@@ -18,9 +18,14 @@ def main():
     parser.add_argument("--table", type=str, default="stop_save_test_Bart", help="BigQuery table name")
     parser.add_argument("--partition-field", type=str, default="inference_date")
     parser.add_argument("--sql-file", type=str, default="src/sql/stop_save_source.sql")
-    parser.add_argument("--local-output", type=str, default="data/stop_save_source.parquet")
+    parser.add_argument("--local-output", type=str, default=None, help="Path to save the local cache. If not provided, a default name with a timestamp is used.")
     
     args = parser.parse_args()
+    
+    # Construction of default local output path with timestamp
+    if args.local_output is None:
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        args.local_output = f"data/stop_save_source_{timestamp}.parquet"
     
     # Construct full target table path
     target_table_id = f"{args.project}.{args.dataset}.{args.table}"

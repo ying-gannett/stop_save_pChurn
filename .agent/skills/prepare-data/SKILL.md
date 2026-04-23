@@ -22,7 +22,7 @@ Execute this script using `uv run`. You must parse the user's request to pass th
 - `--project`: BigQuery project ID. Default: `gannett-datascience`.
 - `--dataset`: BigQuery dataset name. Default: `test_activation_zone`.
 - `--table`: BigQuery target table name. Default: `stop_save_test_Bart`.
-- `--local-output`: Path to save the local cache. Default: `data/stop_save_source.parquet`.
+- `--local-output`: Path to save the local cache. Default: `data/stop_save_source_YYYYMMDD_HHMMSS.parquet` (timestamped).
 
 **Execution Examples:**
 - *Basic (defaults):* `uv run python src/data_processing.py`
@@ -34,7 +34,7 @@ Execute this script using `uv run`. You must parse the user's request to pass th
 
 After the pipeline runs successfully, verify that the local copy of the data has been generated.
 
-- Use the file system to check for the existence of `data/stop_save_source.parquet` (or the path specified by `--local-output`).
+- Use the file system to check for the existence of the generated parquet file in the `data/` directory. Note that the filename will include a timestamp if a specific path wasn't provided.
 
 ### 3. Perform Data Quality Assessment
 
