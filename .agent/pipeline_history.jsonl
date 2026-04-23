@@ -1,2 +1,4 @@
-{"run_date": "2026-04-19", "sql_file": "stop_save_source.sql", "row_count": 607416, "null_percentage": 0.0, "row_count_passed": true, "nulls_passed": true}
+{"run_date": "2026-04-12", "target_table": "gannett-datascience.test_activation_zone.ss_test_dev", "sql_file": "stop_save_source.sql", "row_count": 611783, "null_percentage": 0.0, "row_count_passed": true, "nulls_passed": true}
+{"run_date": "2026-04-19", "target_table": "gannett-datascience.test_activation_zone.ss_test_dev", "sql_file": "stop_save_source.sql", "row_count": 607416, "null_percentage": 0.0, "row_count_passed": true, "nulls_passed": true}
+{"run_date": "2026-04-12", "target_table": "gannett-datascience.test_activation_zone.ss_test_dev", "sql_file": "stop_save_source.sql", "row_count": 611783, "null_percentage": 0.0, "row_count_passed": true, "nulls_passed": true}
 {"run_date": "2026-04-19", "target_table": "gannett-datascience.test_activation_zone.ss_test_dev", "sql_file": "stop_save_source.sql", "row_count": 607416, "null_percentage": 0.0, "row_count_passed": true, "nulls_passed": true}

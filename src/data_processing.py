@@ -54,8 +54,11 @@ def run_extraction(run_date_str: str, project: str, dataset: str, table: str, pa
     sql_query = sql_template.format(run_date=target_sunday_str)
     
     # --- Execute and Save to BQ ---
+    partition_decorator = target_sunday.strftime("%Y%m%d")
+    destination_partition = f"{target_table_id}${partition_decorator}"
+
     job_config = bigquery.QueryJobConfig(
-        destination=target_table_id,
+        destination=destination_partition,
         write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
         time_partitioning=bigquery.TimePartitioning(
             type_=bigquery.TimePartitioningType.DAY,
@@ -63,7 +66,7 @@ def run_extraction(run_date_str: str, project: str, dataset: str, table: str, pa
         )
     )
     
-    print(f"Executing query and saving to BigQuery table `{target_table_id}`...")
+    print(f"Executing query and saving to BigQuery partition `{destination_partition}`...")
     try:
         query_job = client.query(sql_query, job_config=job_config)
         query_job.result()
