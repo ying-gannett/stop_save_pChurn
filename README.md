@@ -55,7 +55,13 @@ stop_save_pChurn/
 ### Data Preparation
 The data pipeline is orchestrated by an AI agent skill or can be run directly:
 
-1.  **Via Agent**: Ask Gemini CLI to "prepare the data" or "run the data pipeline".
+1.  **Via Agent**: 
+    - **Install Skill**: If not already installed, run:
+      ```bash
+      gemini skills install prepare-data.skill --scope workspace
+      ```
+    - **Reload**: Type `/skills reload` in your Gemini CLI session to activate the skill.
+    - **Run**: Ask Gemini CLI to "prepare the data" or "run the data pipeline".
 2.  **Directly**: 
     ```bash
     python src/data_processing.py
