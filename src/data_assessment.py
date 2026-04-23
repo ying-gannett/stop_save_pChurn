@@ -47,7 +47,7 @@ def check_deviation(current_val: float, historical_avg: float, metric_name: str)
     
     return True, ""
 
-def run_assessment(file_path: str, run_date: str, sql_file: str) -> None:
+def run_assessment(file_path: str, run_date: str, sql_file: str, target_table: str) -> None:
     """
     Loads the downloaded data, calculates metrics, checks for anomalies against history,
     and updates the history file.
@@ -98,6 +98,7 @@ def run_assessment(file_path: str, run_date: str, sql_file: str) -> None:
     # 4. Save to History
     record = {
         "run_date": run_date,
+        "target_table": target_table,
         "sql_file": os.path.basename(sql_file),
         "row_count": current_row_count,
         "null_percentage": current_null_pct,

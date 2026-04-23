@@ -7,10 +7,10 @@ def get_most_recent_sunday(date_obj: datetime.date) -> datetime.date:
     idx = (date_obj.weekday() + 1) % 7
     return date_obj - datetime.timedelta(days=idx)
 
-def run_extraction(run_date_str: str, project: str, dataset: str, table: str, partition_field: str, sql_file: str, local_output: str) -> tuple[str, str]:
+def run_extraction(run_date_str: str, project: str, dataset: str, table: str, partition_field: str, sql_file: str, local_output: str) -> tuple[str, str, str]:
     """
     Executes the BigQuery pipeline and downloads the result.
-    Returns a tuple of (local_output_path, target_sunday_str).
+    Returns a tuple of (local_output_path, target_sunday_str, target_table_id).
     """
     if local_output is None:
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -89,4 +89,4 @@ def run_extraction(run_date_str: str, project: str, dataset: str, table: str, pa
     except Exception as e:
         raise RuntimeError(f"Failed downloading local copy: {e}")
         
-    return local_output, target_sunday_str
+    return local_output, target_sunday_str, target_table_id

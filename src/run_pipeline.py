@@ -17,7 +17,7 @@ def main():
     
     # 1. Extraction Phase
     try:
-        local_output_path, target_sunday_str = run_extraction(
+        local_output_path, target_sunday_str, target_table_id = run_extraction(
             run_date_str=args.run_date,
             project=args.project,
             dataset=args.dataset,
@@ -34,7 +34,8 @@ def main():
     run_assessment(
         file_path=local_output_path,
         run_date=target_sunday_str,
-        sql_file=args.sql_file
+        sql_file=args.sql_file,
+        target_table=target_table_id
     )
 
 if __name__ == "__main__":
