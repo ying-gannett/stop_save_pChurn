@@ -98,7 +98,7 @@ def run_assessment(file_path: str, run_date: str, sql_file: str, target_table: s
 
     # 4. Save to History
     record = {
-        "execution_timestamp": datetime.datetime.now().isoformat(),
+        "execution_timestamp": datetime.datetime.now().strftime("%Y-%m-%d-%H:%M:%S"),
         "run_date": run_date,
         "target_table": target_table,
         "sql_file": os.path.basename(sql_file),
