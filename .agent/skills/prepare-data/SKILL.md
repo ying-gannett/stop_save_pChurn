@@ -13,7 +13,7 @@ When asked to prepare data, run the data pipeline, or assess data quality, follo
 
 ### 1. Execute the Data Pipeline
 
-The data pipeline logic is handled by a Python script located at `src/data_processing.py`. 
+The data pipeline logic is orchestrated by a Python script located at `src/run_pipeline.py`. 
 
 Execute this script using `uv run`. You must parse the user's request to pass the appropriate flags. If the user doesn't specify values, use the script's defaults.
 
@@ -25,25 +25,19 @@ Execute this script using `uv run`. You must parse the user's request to pass th
 - `--local-output`: Path to save the local cache. Default: `data/stop_save_source_YYYYMMDD_HHMMSS.parquet` (timestamped).
 
 **Execution Examples:**
-- *Basic (defaults):* `uv run python src/data_processing.py`
-- *Specific Date & Table:* `uv run python src/data_processing.py --run-date 2026-04-01 --table custom_table_name`
+- *Basic (defaults):* `uv run python src/run_pipeline.py`
+- *Specific Date & Table:* `uv run python src/run_pipeline.py --run-date 2026-04-01 --table custom_table_name`
 
-**Important:** The script contains a guardrail that will fail and stop execution if the Tuesday churn predictions for the calculated Sunday are not available in BigQuery. If you encounter this error, report it directly to the user.
+**Guardrails & Alerts (CRITICAL):**
+1. **Missing Data:** The script contains a guardrail that will fail and stop execution if the Tuesday churn predictions for the calculated Sunday are not available in BigQuery. If you encounter this error, report it directly to the user.
+2. **Data Anomalies:** The pipeline automatically performs a Data Quality Assessment after extraction. It compares the current row counts and null percentages against historical averages stored in `.agent/pipeline_history.jsonl`.
+   - **If the pipeline outputs a `⚠️ ALERT` message** indicating an anomaly (e.g., >10% deviation), you **MUST HALT** your execution immediately. Present the alert message to the user and ask for their guidance on whether to proceed with analysis or investigate the anomaly. Do not proceed until approved.
 
 ### 2. Verify Output Files
 
 After the pipeline runs successfully, verify that the local copy of the data has been generated.
 
-- Use the file system to check for the existence of the generated parquet file in the `data/` directory. Note that the filename will include a timestamp if a specific path wasn't provided.
-
-### 3. Perform Data Quality Assessment
-
-Once the local data is available, perform a preliminary data quality assessment using Python (e.g., via a pandas script).
-
-Ensure you check and report on:
-- **Availability:** Did the expected queries run and produce outputs?
-- **Null Values:** Are there critical columns with high percentages of missing data?
-- **Row Counts:** Do the row counts seem reasonable for the specific tables (e.g., matching expected weekly volumes of ~600k+ rows)?
+- Use the file system to check for the existence of the generated parquet file in the `data/` directory.
 
 ### Notes
 
