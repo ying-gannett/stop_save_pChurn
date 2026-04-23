@@ -1,0 +1,2 @@
+{"run_date": "2026-04-19", "row_count": 607416, "null_percentage": 0.0, "row_count_passed": true, "nulls_passed": true}
+{"run_date": "2026-04-19", "sql_file": "stop_save_source.sql", "row_count": 607416, "null_percentage": 0.0, "row_count_passed": true, "nulls_passed": true}
