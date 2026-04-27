@@ -18,15 +18,34 @@ The data pipeline logic is orchestrated by a Python script located at `src/run_p
 Execute this script using `uv run`. You must parse the user's request to pass the appropriate flags. If the user doesn't specify values, use the script's defaults.
 
 **Available Parameters:**
-- `--run-date`: The target date (YYYY-MM-DD). The script will automatically calculate the most recent Sunday prior to this date. Default: Today.
+- `--run-date`: The target date (YYYY-MM-DD). Default: Today.
+- `--date-mode`: `sunday` (calculates previous Sunday) or `exact` (uses exactly the run-date). Default: `sunday`.
 - `--project`: BigQuery project ID. Default: `gannett-datascience`.
 - `--dataset`: BigQuery dataset name. Default: `test_activation_zone`.
 - `--table`: BigQuery target table name. Default: `stop_save_test_Bart`.
-- `--local-output`: Path to save the local cache. Default: `data/stop_save_source_YYYYMMDD_HHMMSS.parquet` (timestamped).
+- `--sql-file`: Path to the SQL file to execute. Default: `src/sql/stop_save_source.sql`.
+- `--partition-field`: The partition field used in the SQL. Default: `inference_date`.
+- `--guardrail-table`: Table to check for data availability. Pass empty string `""` to bypass.
+- `--skip-download`: Pass this flag to skip downloading local cache and bypass data assessment entirely.
+- `--local-output`: Path to save the local cache. Default: `data/stop_save_source_YYYYMMDD_HHMMSS.parquet`.
 
 **Execution Examples:**
-- *Basic (defaults):* `uv run python src/run_pipeline.py`
-- *Specific Date & Table:* `uv run python src/run_pipeline.py --run-date 2026-04-01 --table custom_table_name`
+
+*1. Standard Churn Prediction Pipeline (Default)*
+```bash
+uv run python src/run_pipeline.py --run-date 2026-04-01 --table custom_table_name
+```
+
+*2. GA4 Online Cancel Pipeline (Exact date, no guardrails, no download)*
+```bash
+uv run python src/run_pipeline.py \
+  --sql-file src/sql/raw_online_cancel.sql \
+  --table ss_test_online_cancel_raw \
+  --partition-field event_date \
+  --date-mode exact \
+  --guardrail-table "" \
+  --skip-download
+```
 
 **Guardrails & Alerts (CRITICAL):**
 1. **Missing Data:** The script contains a guardrail that will fail and stop execution if the Tuesday churn predictions for the calculated Sunday are not available in BigQuery. If you encounter this error, report it directly to the user.
