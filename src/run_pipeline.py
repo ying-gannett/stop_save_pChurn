@@ -5,19 +5,23 @@ from data_assessment import run_assessment
 
 def main():
     parser = argparse.ArgumentParser(description="Run Stop Save Data Pipeline and Quality Assessment")
-    parser.add_argument("--run-date", type=str, help="Run date in YYYY-MM-DD format. Defaults to today.", default=datetime.date.today().isoformat())
-    parser.add_argument("--project", type=str, default="gannett-datascience", help="BigQuery project ID")
-    parser.add_argument("--dataset", type=str, default="test_activation_zone", help="BigQuery dataset name")
-    parser.add_argument("--table", type=str, default="stop_save_test_Bart", help="BigQuery table name")
-    parser.add_argument("--partition-field", type=str, default="inference_date", help="Field used for BigQuery time partitioning")
-    parser.add_argument("--sql-file", type=str, default="src/sql/stop_save_source.sql", help="Path to parameterized SQL script")
-    parser.add_argument("--local-output", type=str, default=None, help="Path to save the local cache. If not provided, a timestamp is used.")
     
-    # New Arguments for modular pipeline
-    parser.add_argument("--date-mode", type=str, default="sunday", choices=["sunday", "exact"], help="How to calculate the target date. 'sunday' (default) uses previous Sunday, 'exact' uses --run-date.")
-    parser.add_argument("--guardrail-table", type=str, default="gannett-enterprise-data.models_sz.pchurn_do_risk_tiers", help="Table to check for data availability. Pass empty string '' to bypass.")
-    parser.add_argument("--skip-download", action="store_true", help="Skip downloading local cache and bypass data assessment entirely.")
+    # 1. CORE SOURCE & DESTINATION
+    parser.add_argument("--sql-file", type=str, default="src/sql/stop_save_source.sql", help="Path to parameterized SQL script")
+    parser.add_argument("--run-date", type=str, help="Run date in YYYY-MM-DD format. Defaults to today.", default=datetime.date.today().isoformat())
+    parser.add_argument("--table", type=str, default="stop_save_test_Bart", help="BigQuery target table name")
+    parser.add_argument("--dataset", type=str, default="test_activation_zone", help="BigQuery dataset name")
+    parser.add_argument("--project", type=str, default="gannett-datascience", help="BigQuery project ID")
 
+    # 2. PIPELINE BEHAVIOR & LOGIC
+    parser.add_argument("--date-mode", type=str, default="sunday", choices=["sunday", "exact"], help="How to calculate the target date. 'sunday' (default) uses previous Sunday, 'exact' uses --run-date.")
+    parser.add_argument("--partition-field", type=str, default="inference_date", help="Field used for BigQuery time partitioning")
+    parser.add_argument("--guardrail-table", type=str, default="gannett-enterprise-data.models_sz.pchurn_do_risk_tiers", help="Table to check for data availability. Pass empty string '' to bypass.")
+    
+    # 3. OUTPUT & ASSESSMENT
+    parser.add_argument("--skip-download", action="store_true", help="Skip downloading local cache and bypass data assessment entirely.")
+    parser.add_argument("--local-output", type=str, default=None, help="Path to save the local cache. If not provided, a timestamped parquet name is used.")
+    
     args = parser.parse_args()
     
     # 1. Extraction Phase

@@ -1,64 +1,53 @@
 ---
 name: prepare-data
-description: Data preparation and assessment pipeline for the pChurn Stop & Save project. Use this when the user asks to run the data pipeline, fetch churn data, or assess data quality.
+description: Data preparation and assessment pipeline for the pChurn Stop & Save project. Use this when the user asks to run the data pipeline, fetch churn data, or assess data quality for GA4 or Churn predictions.
 ---
 
 # Prepare Data Skill
 
-This skill orchestrates the data extraction and quality assessment pipeline for the pChurn Stop & Save project. The pipeline executes parameterized BigQuery SQL scripts to collect churn predictions and subscription data, persists the results in BigQuery, and downloads local copies for analysis.
+This skill orchestrates the data extraction and quality assessment pipeline for the pChurn Stop & Save project. The pipeline executes parameterized BigQuery SQL scripts, persists the results in BigQuery partitions, and optionally downloads local copies for quality assessment.
 
 ## Workflow
 
-When asked to prepare data, run the data pipeline, or assess data quality, follow these steps strictly:
+When asked to prepare data, run the data pipeline, or assess data quality, follow these steps:
 
-### 1. Execute the Data Pipeline
+### 1. Identify the Pipeline Configuration
+Determine which SQL file and configuration to use based on the user's request:
+- **Churn Predictions:** Use `stop_save_source.sql` (default). Usually requires `sunday` date-mode and data assessment.
+- **Online Cancel (GA4):** Use `raw_online_cancel.sql`. Usually requires `exact` date-mode and `--skip-download`.
 
-The data pipeline logic is orchestrated by a Python script located at `src/run_pipeline.py`. 
+### 2. Execute the Data Pipeline
+Execute the orchestrator using `uv run python src/run_pipeline.py`. 
 
-Execute this script using `uv run`. You must parse the user's request to pass the appropriate flags. If the user doesn't specify values, use the script's defaults.
+**Parameters (Grouped by Function):**
 
-**Available Parameters:**
+*Core Source & Destination:*
+- `--sql-file`: Path to the SQL file. Default: `src/sql/stop_save_source.sql`.
 - `--run-date`: The target date (YYYY-MM-DD). Default: Today.
-- `--date-mode`: `sunday` (calculates previous Sunday) or `exact` (uses exactly the run-date). Default: `sunday`.
-- `--project`: BigQuery project ID. Default: `gannett-datascience`.
-- `--dataset`: BigQuery dataset name. Default: `test_activation_zone`.
-- `--table`: BigQuery target table name. Default: `stop_save_test_Bart`.
-- `--sql-file`: Path to the SQL file to execute. Default: `src/sql/stop_save_source.sql`.
-- `--partition-field`: The partition field used in the SQL. Default: `inference_date`.
-- `--guardrail-table`: Table to check for data availability. Pass empty string `""` to bypass.
-- `--skip-download`: Pass this flag to skip downloading local cache and bypass data assessment entirely.
-- `--local-output`: Path to save the local cache. Default: `data/stop_save_source_YYYYMMDD_HHMMSS.parquet`.
+- `--table`: Target table name. Default: `stop_save_test_Bart`.
+- `--dataset`: Target dataset name. Default: `test_activation_zone`.
 
-**Execution Examples:**
+*Pipeline Behavior:*
+- `--date-mode`: `sunday` (calculates previous Sunday) or `exact` (uses run-date). Default: `sunday`.
+- `--partition-field`: The field used for BQ partitioning. Default: `inference_date`.
+- `--guardrail-table`: Table to check for availability. Pass `""` to bypass.
 
-*1. Standard Churn Prediction Pipeline (Default)*
-```bash
-uv run python src/run_pipeline.py --run-date 2026-04-01 --table custom_table_name
-```
+*Output & Assessment:*
+- `--skip-download`: Pass this flag to skip local download and bypass data assessment.
+- `--local-output`: Path for local cache. Default: `data/stop_save_source_YYYYMMDD_HHMMSS.parquet`.
 
-*2. GA4 Online Cancel Pipeline (Exact date, no guardrails, no download)*
-```bash
-uv run python src/run_pipeline.py \
-  --sql-file src/sql/raw_online_cancel.sql \
-  --table ss_test_online_cancel_raw \
-  --partition-field event_date \
-  --date-mode exact \
-  --guardrail-table "" \
-  --skip-download
-```
+### 3. Monitor for Guardrails & Alerts (CRITICAL)
+1. **Missing Data:** If the script fails because data is not available in the `guardrail-table`, report this to the user immediately.
+2. **Data Anomalies:** If the pipeline outputs a `⚠️ ALERT` (e.g., >10% deviation in row counts or nulls), you **MUST HALT** immediately. Present the alert to the user and wait for approval before any further analysis.
 
-**Guardrails & Alerts (CRITICAL):**
-1. **Missing Data:** The script contains a guardrail that will fail and stop execution if the Tuesday churn predictions for the calculated Sunday are not available in BigQuery. If you encounter this error, report it directly to the user.
-2. **Data Anomalies:** The pipeline automatically performs a Data Quality Assessment after extraction. It compares the current row counts and null percentages against historical averages stored in `.agent/pipeline_history.jsonl`.
-   - **If the pipeline outputs a `⚠️ ALERT` message** indicating an anomaly (e.g., >10% deviation), you **MUST HALT** your execution immediately. Present the alert message to the user and ask for their guidance on whether to proceed with analysis or investigate the anomaly. Do not proceed until approved.
+## Execution Examples
 
-### 2. Verify Output Files
+**Example A: Standard Churn Pipeline**
+`uv run python src/run_pipeline.py --run-date 2026-04-01 --table churn_results`
 
-After the pipeline runs successfully, verify that the local copy of the data has been generated.
+**Example B: GA4 Online Cancel Pipeline**
+`uv run python src/run_pipeline.py --sql-file src/sql/raw_online_cancel.sql --table online_cancel_raw --partition-field event_date --date-mode exact --guardrail-table "" --skip-download`
 
-- Use the file system to check for the existence of the generated parquet file in the `data/` directory.
-
-### Notes
-
-- The SQL file (`src/sql/stop_save_source.sql`) is parameterized and tracked by Git. 
-- Do NOT attempt to run the SQL file directly using the `bq` CLI tool. Always use the Python execution path.
+## Notes
+- Do NOT run SQL directly via `bq` CLI; always use the Python orchestrator.
+- Local parquet files are timestamped to prevent accidental overwrites.
