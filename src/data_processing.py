@@ -1,7 +1,7 @@
 import datetime
 import os
 from google.cloud import bigquery
-from typing import Optional
+from typing import Optional, List
 
 def calculate_target_date(run_date_str: str, mode: str) -> datetime.date:
     """Calculates the target date based on the mode ('exact' or 'sunday')."""
@@ -13,6 +13,32 @@ def calculate_target_date(run_date_str: str, mode: str) -> datetime.date:
         return run_date - datetime.timedelta(days=idx)
     else:
         raise ValueError(f"Unknown date-mode: {mode}. Use 'exact' or 'sunday'.")
+
+def get_latest_partition_date(client: bigquery.Client, table_id: str, partition_field: str) -> Optional[datetime.date]:
+    """Queries BigQuery to find the maximum partition date in the target table."""
+    query = f"SELECT MAX({partition_field}) as max_date FROM `{table_id}`"
+    try:
+        query_job = client.query(query)
+        results = list(query_job.result())
+        return results[0].max_date
+    except Exception:
+        # Returns None if table doesn't exist or column is missing
+        return None
+
+def get_date_range(start_date: datetime.date, end_date: datetime.date, mode: str) -> List[datetime.date]:
+    """Generates a list of dates between start (exclusive) and end (inclusive)."""
+    dates = []
+    current = start_date
+    
+    step = datetime.timedelta(days=1)
+    if mode.lower() == 'sunday':
+        step = datetime.timedelta(days=7)
+        
+    current += step
+    while current <= end_date:
+        dates.append(current)
+        current += step
+    return dates
 
 def check_guardrail(client: bigquery.Client, target_date_str: str, guardrail_table: str):
     """Checks if the target date exists in the guardrail table. Skips if guardrail_table is empty."""
@@ -48,7 +74,7 @@ def execute_bq_query(client: bigquery.Client, sql_file: str, target_table_id: st
         
     sql_query = sql_template.format(run_date=target_date_str)
     
-    # Format partition decorator: YYYYMMDD (remove hyphens from ISO string)
+    # Format partition decorator: YYYYMMDD
     partition_decorator = target_date_str.replace("-", "")
     destination_partition = f"{target_table_id}${partition_decorator}"
 
@@ -92,30 +118,23 @@ def download_local_cache(client: bigquery.Client, target_table_id: str, partitio
         
     return local_output
 
-def run_extraction(run_date_str: str, project: str, dataset: str, table: str, partition_field: str, sql_file: str, local_output: Optional[str], date_mode: str, guardrail_table: str, skip_download: bool) -> tuple[Optional[str], str, str]:
+def run_extraction(client: bigquery.Client, target_date: datetime.date, project: str, dataset: str, table: str, partition_field: str, sql_file: str, local_output: Optional[str], guardrail_table: str, skip_download: bool) -> tuple[Optional[str], str, str]:
     """
-    Main orchestrator for the extraction phase.
+    Core extraction logic for a single date.
     Returns (local_output_path, target_date_str, target_table_id).
     """
-    client = bigquery.Client(project=project)
     target_table_id = f"{project}.{dataset}.{table}"
-    
-    # 1. Calculate Date
-    target_date = calculate_target_date(run_date_str, date_mode)
     target_date_str = target_date.isoformat()
-    print(f"Targeting pipeline execution for date: {target_date_str}")
     
-    # 2. Check Guardrail
+    # 1. Check Guardrail
     check_guardrail(client, target_date_str, guardrail_table)
     
-    # 3. Execute Query
+    # 2. Execute Query
     execute_bq_query(client, sql_file, target_table_id, partition_field, target_date_str)
     
-    # 4. Download Cache (Conditional)
+    # 3. Download Cache (Conditional)
     downloaded_path = None
     if not skip_download:
         downloaded_path = download_local_cache(client, target_table_id, partition_field, target_date_str, local_output)
-    else:
-        print("Skipping local download as --skip-download was provided.")
         
     return downloaded_path, target_date_str, target_table_id

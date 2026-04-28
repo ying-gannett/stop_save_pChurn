@@ -31,6 +31,7 @@ Execute the orchestrator using `uv run python src/run_pipeline.py`.
 - `--date-mode`: `sunday` (calculates previous Sunday) or `exact` (uses run-date). Default: `sunday`.
 - `--partition-field`: The field used for BQ partitioning. Default: `inference_date`.
 - `--guardrail-table`: Table to check for availability. Pass `""` to bypass.
+- `--catch-up`: Automatically fill missing partitions between the last entry in BQ and the `--run-date`.
 
 *Output & Assessment:*
 - `--skip-download`: Pass this flag to skip local download and bypass data assessment.
@@ -47,6 +48,9 @@ Execute the orchestrator using `uv run python src/run_pipeline.py`.
 
 **Example B: GA4 Online Cancel Pipeline**
 `uv run python src/run_pipeline.py --sql-file src/sql/raw_online_cancel.sql --table online_cancel_raw --partition-field event_date --date-mode exact --guardrail-table "" --skip-download`
+
+**Example C: Catch-up Pipeline (Fill missing daily GA4 data)**
+`uv run python src/run_pipeline.py --sql-file src/sql/raw_online_cancel.sql --table online_cancel_raw --partition-field event_date --date-mode exact --guardrail-table "" --skip-download --catch-up`
 
 ## Notes
 - Do NOT run SQL directly via `bq` CLI; always use the Python orchestrator.
