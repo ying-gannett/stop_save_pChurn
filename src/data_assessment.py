@@ -2,6 +2,7 @@ import datetime
 import json
 import os
 import pandas as pd
+from typing import Optional
 
 HISTORY_FILE = ".agent/pipeline_history.jsonl"
 DEVIATION_THRESHOLD = 0.10  # 10%
@@ -25,7 +26,15 @@ def load_history() -> list[dict]:
                     history.append(json.loads(line.strip()))
     return history
 
-def log_run(run_date: str, sql_file: str, target_table: str, row_count: int = None, null_percentage: float = None, row_count_passed: bool = None, nulls_passed: bool = None):
+def log_run(
+    run_date: str,
+    sql_file: str,
+    target_table: str,
+    row_count: Optional[int] = None,
+    null_percentage: Optional[float] = None,
+    row_count_passed: Optional[bool] = None,
+    nulls_passed: Optional[bool] = None,
+):
     """Logs the execution metrics to the JSONL history file."""
     record = {
         "execution_timestamp": datetime.datetime.now().isoformat(),

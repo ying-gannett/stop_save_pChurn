@@ -1,6 +1,4 @@
 -- Prepare raw entering cancel flow events from GA4 data
-declare launching_date Date default '2026-04-03'; -- the test launching date
-
 with raw as (
   select
     event_date,
