@@ -13,8 +13,8 @@ When asked to prepare data, run the data pipeline, or assess data quality, follo
 
 ### 1. Identify the Pipeline Configuration
 Determine which SQL file and configuration to use based on the user's request:
-- **Churn Predictions:** Use `stop_save_source.sql` (default). Usually requires `sunday` date-mode and data assessment.
-- **Online Cancel (GA4):** Use `raw_online_cancel.sql`. Usually requires `exact` date-mode and `--skip-download`.
+- **Churn Predictions:** Use `stop_save_source.sql`. It requires `sunday` date-mode and data assessment.
+- **Online Cancel (GA4):** Use `raw_online_cancel.sql`. It requires `exact` date-mode and `--skip-download`.
 
 ### 2. Execute the Data Pipeline
 Execute the orchestrator using `uv run python src/run_pipeline.py`. 

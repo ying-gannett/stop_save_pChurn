@@ -1,4 +1,6 @@
 -- Prepare raw entering cancel flow events from GA4 data
+declare launching_date Date default '2026-04-03'; -- the test launching date
+
 with raw as (
   select
     event_date,
@@ -6,7 +8,7 @@ with raw as (
     d031_website_id as website_id,
     LOWER(d027_event_detail) as event_detail,
   from `gannett-enterprise-data.google_analytics_cz.ga4_events_refined`
-  where event_date = DATE('{run_date}')
+  where event_date = GREATEST(DATE('2026-04-03'), DATE('{run_date}'))
 ),
 tag_event as (
   select distinct
