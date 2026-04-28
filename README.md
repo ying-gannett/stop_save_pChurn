@@ -75,7 +75,7 @@ The data pipeline is orchestrated by an AI agent skill or can be run directly:
 1. Weekly Tuesday (Churn): 
     "Execute stop_save_source.sql for <this week>. The target BQ table is <gannett-datascience.test_activation_zone.stop_save_test_Bart>."
 2. Weekly Tuesday (GA4 catch-up run for the past week): 
-    "Execute raw_online_cancel.sql for <this week>. Date mode is "exact". The target BQ table is <gannett-datascience.test_activation_zone.ss_test_online_cancel_raw>, partitioned by event_date. Skip the local download."
+    "Execute raw_online_cancel.sql for <days until last Sunday>. Date mode is "exact". The target BQ table is <gannett-datascience.test_activation_zone.ss_test_online_cancel_raw>, partitioned by event_date. Skip the local download."
 3. Weekly Friday (**Out of the workflow**): 
     Take Step 1 result --> <gannett-datascience.test_results_zone.stop_save_test_applied_Bart>
 4. Weekly Monday (Stitch together): 
