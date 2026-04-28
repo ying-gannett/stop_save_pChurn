@@ -61,7 +61,9 @@ The data pipeline is orchestrated by an AI agent skill or can be run directly:
       gemini skills install prepare-data.skill --scope workspace
       ```
     - **Reload**: Type `/skills reload` in your Gemini CLI session to activate the skill.
-    - **Run**: Ask Gemini CLI to "prepare the data" or "run the data pipeline".
+    - **Run**: You can fire the skill using natural language prompts.
+      - *Example 1 (Churn):* "Prepare the retention source data for the week of April 14th using the default table."
+      - *Example 2 (GA4):* "Run the online cancel GA4 data pipeline for April 20th and skip the local download."
 2.  **Directly**: 
     ```bash
     python src/data_processing.py

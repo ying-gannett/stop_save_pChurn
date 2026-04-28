@@ -2,7 +2,7 @@ import argparse
 import datetime
 from google.cloud import bigquery
 from data_processing import run_extraction, calculate_target_date, get_latest_partition_date, get_date_range
-from data_assessment import run_assessment
+from data_assessment import run_assessment, log_run
 
 def main():
     parser = argparse.ArgumentParser(description="Run Stop Save Data Pipeline and Quality Assessment")
@@ -65,10 +65,17 @@ def main():
                 skip_download=args.skip_download
             )
             
-            # Assessment Phase (only if download wasn't skipped)
+            # Assessment Phase
             if not args.skip_download and local_output_path:
                 run_assessment(
                     file_path=local_output_path,
+                    run_date=target_date_str,
+                    sql_file=args.sql_file,
+                    target_table=target_table_id
+                )
+            else:
+                print("\nSkipping Data Assessment phase since local download was bypassed. Logging execution only.")
+                log_run(
                     run_date=target_date_str,
                     sql_file=args.sql_file,
                     target_table=target_table_id
