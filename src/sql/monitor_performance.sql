@@ -6,7 +6,7 @@
   -- modeltype=PCHURN(pchurn covered)
     -- grouptype: MIDPOINT:CONTRO:TIERED=1:1:1
     -- TIERED: RISK1-5 maintain pchurn ratio.
-
+-- check stop_save_test_applied_Bart is available for last friday
 create or replace table `gannett-datascience.test_results_zone.ss_test_result_v2`
 partition by inference_date
 as
@@ -17,7 +17,7 @@ with ss_applied as (  -- cleaned ss_test_applied
   from (  
     SELECT distinct   
       account, 
-      subscription as billing_account, -- zuora_subscriptionid (Bart) = billing_account (BQ)
+      lower(trim(subscription)) as billing_account, -- zuora_subscriptionid (Bart) = billing_account (BQ)
       currentrate as current_rate, -- rate at the time of pricing
       pricegroup, -- int(currentrate)
       newrate as new_rate, -- the rate they were priced to
@@ -44,14 +44,14 @@ with ss_applied as (  -- cleaned ss_test_applied
   )
   where concat(inference_date, billing_account) not in (  -- remove billing account who have 1+ id_subscrip
     select distinct 
-      concat(inference_date, billing_account)
+      concat(inference_date, lower(trim(billing_account)))
     from `gannett-datascience.test_activation_zone.stop_save_test_Bart` s
     group by 1 having count(distinct id_subscrip) > 1 
   )
 ),
 sub_status as (   -- curated subscription status
   SELECT distinct 
-    l.billing_account, m.id_subscrip,
+    lower(trim(l.billing_account)) as billing_account, m.id_subscrip,
     m.effective_date, m.end_date, m.status
   FROM `gannett-enterprise-data.consumers_curated_zone_assets.subscriptions_main` m 
   join `gannett-enterprise-data.consumers_linkage_cz.subscription_link_latest` l on
@@ -60,7 +60,7 @@ sub_status as (   -- curated subscription status
     m.mdm_product_id = p.product_id
   join `gannett-enterprise-data.mdm_cz.publication` pu on
     p.publication_id = pu.publication_id
-  where l.billing_system = 'ZUORA' and pu.publication_name != 'USA TODAY Play'
+  where pu.publication_name != 'USA TODAY Play'   -- l.billing_system = 'ZUORA' and 
 ),
 churned as (  -- first churn after email_date
   select    
