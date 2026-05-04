@@ -72,13 +72,15 @@ The data pipeline is orchestrated by an AI agent skill or can be run directly:
     The pipeline executes SQL scripts against BigQuery, persists results in BQ tables, and saves local copies to the `data/` directory.
 
 ### Project specific workflow
-1. Weekly Tuesday (Churn): 
+1. Weekly Tuesday (Churn Predictions): 
     "Execute stop_save_source.sql for <this week>. The target BQ table is <gannett-datascience.test_activation_zone.stop_save_test_Bart>."
-2. Weekly Tuesday (GA4 catch-up run for the past week): 
+2. Weekly Tuesday (Online Cancell Data: GA4 catch-up run for the past week): 
     "Execute raw_online_cancel.sql for <days until last Sunday>. Date mode is "exact". The target BQ table is <gannett-datascience.test_activation_zone.ss_test_online_cancel_raw>, partitioned by event_date. Skip the local download."
-3. Weekly Friday (**Out of the workflow**): 
+3. Weekly Friday (**Intervention Data: Out of the workflow**): 
     Take Step 1 result --> <gannett-datascience.test_results_zone.stop_save_test_applied_Bart>
-4. Weekly Monday (Stitch together): 
+4. Weekly Tuesday (Call Center Cancell Data: SKPI):
+    Load SKPI data from spreadsheet into GCP
+5. Weekly Monday (Stitch together): 
     Step 2 + 3 (check step 3 last Friday is ready. check step 2 until last Friday is ready.) --> <Final SQL> --> test_results_zone.ss_test_result 
 
 ## 📊 Analysis Overview
