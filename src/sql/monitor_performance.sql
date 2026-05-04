@@ -7,9 +7,6 @@
     -- grouptype: MIDPOINT:CONTRO:TIERED=1:1:1
     -- TIERED: RISK1-5 maintain pchurn ratio.
 -- check stop_save_test_applied_Bart is available for last friday
-create or replace table `gannett-datascience.test_results_zone.ss_test_result_v2`
-partition by inference_date
-as
 with ss_applied as (  -- cleaned ss_test_applied
   select 
     *, 
@@ -53,17 +50,17 @@ call_center as (  -- cancel attempts and confirmed cancels after email date
   select distinct       
     ss_applied.billing_account,
     1 as called,
-    min(cc.Date) OVER (PARTITION BY ss_applied.billing_account) as __call_cancel_date
+    min(cc.event_date) OVER (PARTITION BY ss_applied.billing_account) as __call_cancel_date
   from ss_applied
-  join `gannett-datascience.test_activation_zone.call_center_data` c on -- attempt to cancel
+  join `gannett-datascience.test_activation_zone.ss_call_center` c on -- attempt to cancel
     ss_applied.billing_account = lower(trim(c.Account))
-    and c.Date >= ss_applied.email_date
+    and c.event_date >= ss_applied.email_date
   left join (
-    select * from `gannett-datascience.test_activation_zone.call_center_data`
+    select * from `gannett-datascience.test_activation_zone.ss_call_center`
     where Saves__Digital_to_Digital_ = 0
   ) cc on
     ss_applied.billing_account = lower(trim(cc.Account))
-    and cc.Date >= ss_applied.email_date
+    and cc.event_date >= ss_applied.email_date
 ),
 sub_status as (   -- curated subscription status
   SELECT distinct 

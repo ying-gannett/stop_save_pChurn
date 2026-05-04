@@ -80,8 +80,8 @@ The data pipeline is orchestrated by an AI agent skill or can be run directly:
     Take Step 1 result --> <gannett-datascience.test_results_zone.stop_save_test_applied_Bart>
 4. Weekly Tuesday (Call Center Cancell Data: SKPI):
     Load SKPI data from spreadsheet into GCP
-5. Weekly Monday (Stitch together): 
-    Step 2 + 3 (check step 3 last Friday is ready. check step 2 until last Friday is ready.) --> <Final SQL> --> test_results_zone.ss_test_result 
+5. Weekly Monday (Step 2 + 3 + 4): 
+    "Execute monitor_performance.sql for <this week>. The target BQ table is <gannett-datascience.test_results_zone.ss_test_result_v2>."
 
 ## 📊 Analysis Overview
 
