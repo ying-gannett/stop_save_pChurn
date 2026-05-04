@@ -73,7 +73,7 @@ The data pipeline is orchestrated by an AI agent skill or can be run directly:
 
 ### Project specific workflow
 1. Weekly Tuesday (Churn Predictions): 
-    "Execute stop_save_source.sql for <this week>. The target BQ table is <gannett-datascience.test_activation_zone.stop_save_test_Bart>."
+    "Execute stop_save_source.sql for <this week>. The target BQ table is <gannett-datascience.test_activation_zone.stop_save_test_Bart>, partitioned by inference_date. "
 2. Weekly Tuesday (Online Cancell Data: GA4 catch-up run for the past week): 
     "Execute raw_online_cancel.sql for <days until last Sunday>. Date mode is "exact". The target BQ table is <gannett-datascience.test_activation_zone.ss_test_online_cancel_raw>, partitioned by event_date. Skip the local download."
 3. Weekly Friday (**Intervention Data: Out of the workflow**): 
@@ -81,7 +81,7 @@ The data pipeline is orchestrated by an AI agent skill or can be run directly:
 4. Weekly Tuesday (Call Center Cancell Data: SKPI):
     Load SKPI data from spreadsheet into GCP
 5. Weekly Monday (Step 2 + 3 + 4): 
-    "Execute monitor_performance.sql for <this week>. The target BQ table is <gannett-datascience.test_results_zone.ss_test_result_v2>."
+    "Execute monitor_performance.sql. The target BQ table is <gannett-datascience.test_results_zone.ss_test_result_v2>."
 
 ## 📊 Analysis Overview
 
