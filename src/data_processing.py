@@ -64,8 +64,8 @@ def check_guardrail(client: bigquery.Client, target_date_str: str, guardrail_tab
     except Exception as e:
         raise RuntimeError(f"Failed during guardrail check: {e}")
 
-def execute_bq_query(client: bigquery.Client, sql_file: str, target_table_id: str, partition_field: str, target_date_str: str):
-    """Reads SQL, applies partition decorator, and executes WRITE_TRUNCATE job."""
+def execute_bq_query(client: bigquery.Client, sql_file: str, target_table_id: str, partition_field: Optional[str], target_date_str: str):
+    """Reads SQL, applies partition decorator if partition_field is provided, and executes WRITE_TRUNCATE job."""
     if not os.path.exists(sql_file):
         raise FileNotFoundError(f"❌ Error: SQL file {sql_file} not found.")
         
@@ -74,20 +74,27 @@ def execute_bq_query(client: bigquery.Client, sql_file: str, target_table_id: st
         
     sql_query = sql_template.format(run_date=target_date_str)
     
-    # Format partition decorator: YYYYMMDD
-    partition_decorator = target_date_str.replace("-", "")
-    destination_partition = f"{target_table_id}${partition_decorator}"
-
-    job_config = bigquery.QueryJobConfig(
-        destination=destination_partition,
-        write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
-        time_partitioning=bigquery.TimePartitioning(
-            type_=bigquery.TimePartitioningType.DAY,
-            field=partition_field
+    if partition_field:
+        # Format partition decorator: YYYYMMDD
+        partition_decorator = target_date_str.replace("-", "")
+        destination = f"{target_table_id}${partition_decorator}"
+        job_config = bigquery.QueryJobConfig(
+            destination=destination,
+            write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+            time_partitioning=bigquery.TimePartitioning(
+                type_=bigquery.TimePartitioningType.DAY,
+                field=partition_field
+            )
         )
-    )
-    
-    print(f"Executing query and saving to BigQuery partition `{destination_partition}`...")
+        print(f"Executing query and saving to BigQuery partition `{destination}`...")
+    else:
+        destination = target_table_id
+        job_config = bigquery.QueryJobConfig(
+            destination=destination,
+            write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE
+        )
+        print(f"Executing query and saving to BigQuery table `{destination}`...")
+
     try:
         query_job = client.query(sql_query, job_config=job_config)
         query_job.result()
@@ -95,8 +102,8 @@ def execute_bq_query(client: bigquery.Client, sql_file: str, target_table_id: st
     except Exception as e:
         raise RuntimeError(f"Failed executing BigQuery SQL: {e}")
 
-def download_local_cache(client: bigquery.Client, target_table_id: str, partition_field: str, target_date_str: str, local_output: Optional[str]) -> str:
-    """Downloads the target partition data to a local file."""
+def download_local_cache(client: bigquery.Client, target_table_id: str, partition_field: Optional[str], target_date_str: str, local_output: Optional[str]) -> str:
+    """Downloads the target partition data to a local file. If partition_field is None, downloads the entire table."""
     if local_output is None:
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         local_output = f"data/stop_save_source_{timestamp}.parquet"
@@ -104,7 +111,10 @@ def download_local_cache(client: bigquery.Client, target_table_id: str, partitio
     os.makedirs(os.path.dirname(local_output), exist_ok=True)
     print(f"Downloading data locally to {local_output}...")
     
-    download_query = f"SELECT * FROM `{target_table_id}` WHERE {partition_field} = DATE('{target_date_str}')"
+    if partition_field:
+        download_query = f"SELECT * FROM `{target_table_id}` WHERE {partition_field} = DATE('{target_date_str}')"
+    else:
+        download_query = f"SELECT * FROM `{target_table_id}`"
     
     try:
         df = client.query(download_query).to_dataframe()
@@ -118,7 +128,7 @@ def download_local_cache(client: bigquery.Client, target_table_id: str, partitio
         
     return local_output
 
-def run_extraction(client: bigquery.Client, target_date: datetime.date, project: str, dataset: str, table: str, partition_field: str, sql_file: str, local_output: Optional[str], guardrail_table: str, skip_download: bool) -> tuple[Optional[str], str, str]:
+def run_extraction(client: bigquery.Client, target_date: datetime.date, project: str, dataset: str, table: str, partition_field: Optional[str], sql_file: str, local_output: Optional[str], guardrail_table: str, skip_download: bool) -> tuple[Optional[str], str, str]:
     """
     Core extraction logic for a single date.
     Returns (local_output_path, target_date_str, target_table_id).

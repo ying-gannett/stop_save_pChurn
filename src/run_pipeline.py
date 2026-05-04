@@ -16,7 +16,7 @@ def main():
 
     # 2. PIPELINE BEHAVIOR & LOGIC
     parser.add_argument("--date-mode", type=str, default="sunday", choices=["sunday", "exact"], help="How to calculate the target date. 'sunday' (default) uses previous Sunday, 'exact' uses --run-date.")
-    parser.add_argument("--partition-field", type=str, default="inference_date", help="Field used for BigQuery time partitioning")
+    parser.add_argument("--partition-field", type=str, default=None, help="Field used for BigQuery time partitioning. If not provided, saves as a non-partitioned table.")
     parser.add_argument("--guardrail-table", type=str, default="gannett-enterprise-data.models_sz.pchurn_do_risk_tiers", help="Table to check for data availability. Pass empty string '' to bypass.")
     parser.add_argument("--catch-up", action="store_true", help="Automatically fill missing partitions between the last entry in BQ and the --run-date.")
 
@@ -34,19 +34,22 @@ def main():
     target_dates = [end_date]
     
     if args.catch_up:
-        print(f"Checking for missing partitions in `{target_table_id}`...")
-        latest_date = get_latest_partition_date(client, target_table_id, args.partition_field)
-        
-        if latest_date:
-            print(f"Latest data found for: {latest_date}")
-            missing_dates = get_date_range(latest_date, end_date, args.date_mode)
-            if missing_dates:
-                print(f"Identified {len(missing_dates)} missing dates to catch up.")
-                target_dates = missing_dates
-            else:
-                print("No missing dates identified. Running only for the target date.")
+        if not args.partition_field:
+            print("Warning: Catch-up mode requested but no partition-field specified. Cannot catch up non-partitioned tables. Running only for the target date.")
         else:
-            print("Target table empty or doesn't exist. Starting catch-up is not possible without a baseline. Running only for the target date.")
+            print(f"Checking for missing partitions in `{target_table_id}`...")
+            latest_date = get_latest_partition_date(client, target_table_id, args.partition_field)
+            
+            if latest_date:
+                print(f"Latest data found for: {latest_date}")
+                missing_dates = get_date_range(latest_date, end_date, args.date_mode)
+                if missing_dates:
+                    print(f"Identified {len(missing_dates)} missing dates to catch up.")
+                    target_dates = missing_dates
+                else:
+                    print("No missing dates identified. Running only for the target date.")
+            else:
+                print("Target table empty or doesn't exist. Starting catch-up is not possible without a baseline. Running only for the target date.")
 
     # Execute the Pipeline for all identified dates
     for target_date in target_dates:
