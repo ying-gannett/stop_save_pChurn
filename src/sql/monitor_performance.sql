@@ -118,15 +118,19 @@ raw_combine as (
 select distinct
   b.*,
   case 
-    when call_cancel_attempt+call_cencelled+online_cancel_attempt+online_canceled=0 then 'No action yet'
+    when call_cancel_attempt+online_cancel_attempt=0 then 'No action yet'
+    when call_cencelled+online_canceled=0 and call_cancel_attempt=1 then 'Call Center Saved'
+    when call_cencelled+online_canceled=0 and online_cancel_attempt=1 then 'Online Saved'
     when call_cencelled=1 then 'Call Center Cancelled'
-    when online_canceled=1 then 'Online Cancelled'
-    when call_cancel_attempt=1 then 'Call Center Saved'
-    else 'Online Saved'
+    else 'Online Cancelled'
   end as cancel_types,
   if(call_cencelled+online_canceled=0, 0, 1) as churned,
-  y.risk_tier as src_risk_tier
+  y.risk_tier as src_risk_tier,
+  z.churn_truth
 from raw_combine b
 left join `gannett-datascience.test_activation_zone.stop_save_test_Bart` y on
   lower(trim(y.billing_account)) = lower(trim(b.billing_account)) 
   and y.inference_date = b.inference_date
+left join `gannett-enterprise-data.models_sz.source_pchurn_segments` z on
+  y.inference_date = z.inference_date
+  and y.id_subscrip = z.id_subscrip
