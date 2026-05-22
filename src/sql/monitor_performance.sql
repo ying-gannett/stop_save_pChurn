@@ -62,10 +62,10 @@ call_center as (  -- cancel attempts and confirmed cancels after email date
     ss_applied.billing_account = lower(trim(cc.Account))
     and cc.event_date >= ss_applied.email_date
 ),
-sub_status as (   -- curated subscription status
+sub_lnk as (   -- link billing_account and id_subscrip
   SELECT distinct 
     lower(trim(l.billing_account)) as billing_account, m.id_subscrip,
-    m.effective_date, m.end_date, m.status
+    -- m.effective_date, m.end_date, m.status
   FROM `gannett-enterprise-data.consumers_curated_zone_assets.subscriptions_main` m 
   join `gannett-enterprise-data.consumers_linkage_cz.subscription_link_latest` l on
     m.id_subscrip = l.circ_idsubscrip
@@ -81,15 +81,15 @@ online as (   -- first confirmed online cancel after email date
     1 as opened_online_cancel,
     min(cc.event_date) OVER (PARTITION BY ss_applied.billing_account) as __ol_cancel_date
   from ss_applied
-  join sub_status on
-    ss_applied.billing_account = sub_status.billing_account
+  join sub_lnk on
+    ss_applied.billing_account = sub_lnk.billing_account
   join(  -- cancel attempt
     select 
       id_subscrip, event_date, 
     from `gannett-datascience.test_activation_zone.ss_test_online_cancel_raw`
     where entered_acc_mng = 1
   ) c on
-    sub_status.id_subscrip = c.id_subscrip
+    sub_lnk.id_subscrip = c.id_subscrip
     and c.event_date >= ss_applied.email_date
   left join (  -- raw online cancels
     select
@@ -97,7 +97,7 @@ online as (   -- first confirmed online cancel after email date
     from `gannett-datascience.test_activation_zone.ss_test_online_cancel_raw`
     where confirmed_cancel = 1
   ) cc on
-    sub_status.id_subscrip = cc.id_subscrip
+    sub_lnk.id_subscrip = cc.id_subscrip
     and cc.event_date >= ss_applied.email_date
 ),
 raw_combine as (
@@ -121,7 +121,7 @@ select distinct
     when call_cancel_attempt+online_cancel_attempt=0 then 'No action yet'
     when call_cencelled+online_canceled=0 and call_cancel_attempt=1 then 'Call Center Saved'
     when call_cencelled+online_canceled=0 and online_cancel_attempt=1 then 'Online Saved'
-    when call_cencelled=1 then 'Call Center Cancelled'
+    when __call_cancel_date <= __ol_cancel_date then 'Call Center Cancelled'
     else 'Online Cancelled'
   end as cancel_types,
   if(call_cencelled+online_canceled=0, 0, 1) as churned,
