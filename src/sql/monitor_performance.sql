@@ -7,7 +7,7 @@
     -- grouptype: MIDPOINT:CONTRO:TIERED=1:1:1
     -- TIERED: RISK1-5 maintain pchurn ratio.
 -- check stop_save_test_applied_Bart is available for last friday
-with ss_applied as (  -- cleaned ss_test_applied
+with raw as (  -- cleaned ss_test_applied
   select 
     *, 
     date_add(inference_date, interval 5 day) as email_date 
@@ -39,57 +39,67 @@ with ss_applied as (  -- cleaned ss_test_applied
       -- ebill, paymentmethod, product, reason, brandid, marketid, 
     FROM `gannett-datascience.test_results_zone.stop_save_test_applied_Bart`
   )
-  where concat(inference_date, billing_account) not in (  -- remove billing account who have 1+ id_subscrip
-    select distinct 
-      concat(inference_date, lower(trim(billing_account)))
-    from `gannett-datascience.test_activation_zone.stop_save_test_Bart` s
-    group by 1 having count(distinct id_subscrip) > 1 
-  )
 ),
-call_center as (  -- cancel attempts and confirmed cancels after email date
+lk as (
+  SELECT distinct 
+    lower(trim(l.billing_account)) as billing_account, 
+    l.circ_idsubscrip as id_subscrip
+  from `gannett-enterprise-data.consumers_linkage_cz.subscription_link_latest` l 
+  where l.billing_system = 'ZUORA' and circ_site != 'PLAY' and product_type != 'E-Edition'
+),
+ss_applied as (   -- link billing_account and id_subscrip
+  select 
+    raw.*,
+    lk.id_subscrip
+  from raw 
+  left join lk on
+  raw.billing_account = lk.billing_account   
+  where raw.modeltype = 'MIDPOINT'
+  union all
+  select 
+    raw.*,
+    p.id_subscrip
+  from raw 
+  left join `gannett-datascience.test_activation_zone.stop_save_test_Bart` p on
+  raw.billing_account = lower(trim(p.billing_account))   
+  and raw.inference_date = p.inference_date
+  where raw.modeltype = 'PCHURN' 
+),
+call_center as (  -- cancel attempts and confirmed cancels after email date 
   select distinct       
     ss_applied.billing_account,
+    ss_applied.id_subscrip,
     1 as called,
-    min(cc.event_date) OVER (PARTITION BY ss_applied.billing_account) as __call_cancel_date
+    min(c.event_date) OVER (PARTITION BY ss_applied.billing_account, ss_applied.id_subscrip) as __call_attempt_date,
+    min(cc.event_date) OVER (PARTITION BY ss_applied.billing_account, ss_applied.id_subscrip) as __call_cancel_date
   from ss_applied
   join `gannett-datascience.test_activation_zone.ss_call_center` c on -- attempt to cancel
     ss_applied.billing_account = lower(trim(c.Account))
+    and ss_applied.id_subscrip = c.idSubscrip
     and c.event_date >= ss_applied.email_date
   left join (
     select * from `gannett-datascience.test_activation_zone.ss_call_center`
     where Saves__Digital_to_Digital_ = 0
   ) cc on
     ss_applied.billing_account = lower(trim(cc.Account))
+    and ss_applied.id_subscrip = c.idSubscrip
     and cc.event_date >= ss_applied.email_date
-),
-sub_lnk as (   -- link billing_account and id_subscrip
-  SELECT distinct 
-    lower(trim(l.billing_account)) as billing_account, m.id_subscrip,
-    -- m.effective_date, m.end_date, m.status
-  FROM `gannett-enterprise-data.consumers_curated_zone_assets.subscriptions_main` m 
-  join `gannett-enterprise-data.consumers_linkage_cz.subscription_link_latest` l on
-    m.id_subscrip = l.circ_idsubscrip
-  join `gannett-enterprise-data.mdm_cz.product` p on 
-    m.mdm_product_id = p.product_id
-  join `gannett-enterprise-data.mdm_cz.publication` pu on
-    p.publication_id = pu.publication_id
-  where pu.publication_name != 'USA TODAY Play' and l.billing_system = 'ZUORA'
 ),
 online as (   -- first confirmed online cancel after email date
   select
     ss_applied.billing_account, 
+    ss_applied.id_subscrip,
     1 as opened_online_cancel,
-    min(cc.event_date) OVER (PARTITION BY ss_applied.billing_account) as __ol_cancel_date
+    min(c.event_date) OVER (PARTITION BY ss_applied.billing_account, ss_applied.id_subscrip) as __ol_attempt_date,
+    min(cc.event_date) OVER (PARTITION BY ss_applied.billing_account, ss_applied.id_subscrip) as __ol_cancel_date
   from ss_applied
-  join sub_lnk on
-    ss_applied.billing_account = sub_lnk.billing_account
   join(  -- cancel attempt
     select 
       id_subscrip, event_date, 
     from `gannett-datascience.test_activation_zone.ss_test_online_cancel_raw`
     where entered_acc_mng = 1
   ) c on
-    sub_lnk.id_subscrip = c.id_subscrip
+    ss_applied.id_subscrip = c.id_subscrip
     and c.event_date >= ss_applied.email_date
   left join (  -- raw online cancels
     select
@@ -97,31 +107,39 @@ online as (   -- first confirmed online cancel after email date
     from `gannett-datascience.test_activation_zone.ss_test_online_cancel_raw`
     where confirmed_cancel = 1
   ) cc on
-    sub_lnk.id_subscrip = cc.id_subscrip
+    ss_applied.id_subscrip = cc.id_subscrip
     and cc.event_date >= ss_applied.email_date
 ),
 raw_combine as (
   select 
     ss_applied.*, 
     coalesce(c.called, 0) as call_cancel_attempt,
+    c.__call_attempt_date,
     if(__call_cancel_date is null, 0, 1) as call_cencelled,
     c.__call_cancel_date,
     coalesce(o.opened_online_cancel, 0) as online_cancel_attempt,
+    o.__ol_attempt_date,
     if(__ol_cancel_date is null, 0, 1) as online_canceled,
     o.__ol_cancel_date,
   from ss_applied
   left join call_center c on
     ss_applied.billing_account = c.billing_account
+    and ss_applied.id_subscrip = c.id_Subscrip
   left join online o on
     ss_applied.billing_account = o.billing_account
+    and ss_applied.id_subscrip = o.id_subscrip
 )
 select distinct
   b.*,
   case 
     when call_cancel_attempt+online_cancel_attempt=0 then 'No action yet'
+    when call_cancel_attempt+online_cancel_attempt=2 and call_cencelled+online_canceled=0 then 'Both attempt and Saved'
+      -- then if(__call_attempt_date>=__ol_attempt_date, 'Call Center Saved', 'Online Saved')
     when call_cencelled+online_canceled=0 and call_cancel_attempt=1 then 'Call Center Saved'
     when call_cencelled+online_canceled=0 and online_cancel_attempt=1 then 'Online Saved'
-    when __call_cancel_date <= __ol_cancel_date then 'Call Center Cancelled'
+    when call_cencelled+online_canceled=2 then 'Both Cancelled'
+      -- then if(__call_cancel_date<=__ol_cancel_date, 'Call Center Cancelled', 'Online Cancelled')
+    when call_cencelled=1 then 'Call Center Cancelled'
     else 'Online Cancelled'
   end as cancel_types,
   if(call_cencelled+online_canceled=0, 0, 1) as churned,
