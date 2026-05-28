@@ -7,9 +7,9 @@
 - **Collect Data** 
     - **Churn Predictions**: predicted churn risk from a existing churn prediction model.
     - **Intervention Data(out of this workflow)**: which stop save strategy was applied to customer.
-    - **Call Center Data**: whether and when customer called to call center.
+    - **Call Center Data(out of this workflow)**: whether and when customer called to call center. Whether the customer was saved or not.
     - **Online Cancell Data**: whether and when customer cancelled the service via online.
-    - **Subscriptions status Data**: whether and when the subscription status change to inactive.
+    - **Monitor performance Data**: Combine the above pieces and calculate performance metrics, such as churn, CNRC
 - **Data Quanty Assessment**: Evaluates the availability and the quality of each data source.
 - **Strategy Evaluation**: Robust data cleaning and feature engineering pipeline to evaluate the effectiveness of each stop save strategy.
     - **Evaluate metrics**: 
@@ -73,15 +73,30 @@ The data pipeline is orchestrated by an AI agent skill or can be run directly:
 
 ### Project specific workflow
 1. Weekly Tuesday (Churn Predictions): 
-    "Execute stop_save_source.sql for <this week>. The target BQ table is <gannett-datascience.test_activation_zone.stop_save_test_Bart>, partitioned by inference_date. "
+    a. **Via Agent**: 
+        "Execute stop_save_source.sql for <this week>. The target BQ table is <gannett-datascience.test_activation_zone.stop_save_test_Bart>, partitioned by inference_date."
+    b. **Directly**:
+        "uv run python src/run_pipeline.py --run-date <2026-04-01> --partition-field inference_date"
 2. Weekly Tuesday (Online Cancell Data: GA4 catch-up run for the past week): 
-    "Execute raw_online_cancel.sql for <days until last Sunday>. Date mode is "exact". The target BQ table is <gannett-datascience.test_activation_zone.ss_test_online_cancel_raw>, partitioned by event_date. Skip the local download."
+    a. **Via Agent**:
+        "Execute raw_online_cancel.sql for <days until last Sunday>. Date mode is "exact". The target BQ table is <gannett-datascience.test_activation_zone.ss_test_online_cancel_raw>, partitioned by event_date. Skip the local download."
+    b. **Directly**:
+        "uv run python src/run_pipeline.py --sql-file src/sql/raw_online_cancel.sql --run-date <2026-05-02> --table ss_test_online_cancel_raw --partition-field event_date --date-mode exact --guardrail-table "" --skip-download --catch-up"
 3. Weekly Friday (**Intervention Data: Out of the workflow**): 
     Take Step 1 result --> <gannett-datascience.test_results_zone.stop_save_test_applied_Bart>
 4. Weekly Tuesday (Call Center Cancell Data: SKPI):
     Load SKPI data from spreadsheet into GCP
+        "LOAD DATA INTO `gannett-datascience.test_activation_zone.ss_call_center`
+        FROM FILES (
+        format = 'CSV',
+        uris = ['gs://gannett-data-science/Ying/ss_test_callcenter_data/ss_callcenter-0501-to-0518.csv']
+        )
+        "
 5. Weekly Monday (Step 2 + 3 + 4): 
-    "Execute monitor_performance.sql. The target BQ table is <gannett-datascience.test_results_zone.ss_test_result_v2>."
+    a. **Via Agent**:
+        "Execute monitor_performance.sql. The target BQ table is <gannett-datascience.test_results_zone.ss_test_result_v2>."
+    b. **Directly**:
+        "uv run python src/run_pipeline.py --sql-file src/sql/monitor_performance.sql --dataset test_results_zone --table ss_test_result_v2"
 
 ## 📊 Analysis Overview
 
