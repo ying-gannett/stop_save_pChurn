@@ -47,10 +47,10 @@ Execute the orchestrator using `uv run python src/run_pipeline.py`.
 `uv run python src/run_pipeline.py --run-date 2026-04-01 --table churn_results`
 
 **Example B: GA4 Online Cancel Pipeline**
-`uv run python src/run_pipeline.py --sql-file src/sql/raw_online_cancel.sql --table online_cancel_raw --partition-field event_date --date-mode exact --guardrail-table "" --skip-download`
+`uv run python src/run_pipeline.py --sql-file src/sql/raw_online_cancel.sql --run-date 2026-05-02 --table ss_test_online_cancel_raw --partition-field event_date --date-mode exact --guardrail-table "" --skip-download`
 
 **Example C: Catch-up Pipeline (Fill missing daily GA4 data)**
-`uv run python src/run_pipeline.py --sql-file src/sql/raw_online_cancel.sql --table online_cancel_raw --partition-field event_date --date-mode exact --guardrail-table "" --skip-download --catch-up`
+`uv run python src/run_pipeline.py --sql-file src/sql/raw_online_cancel.sql --run-date 2026-05-02 --table ss_test_online_cancel_raw --partition-field event_date --date-mode exact --guardrail-table "" --skip-download --catch-up`
 
 ## Notes
 - Do NOT run SQL directly via `bq` CLI; always use the Python orchestrator.
