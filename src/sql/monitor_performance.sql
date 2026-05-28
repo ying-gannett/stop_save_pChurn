@@ -111,8 +111,10 @@ online as (   -- first confirmed online cancel after email date
     ss_applied.id_subscrip = cc.id_subscrip
     and cc.event_date >= ss_applied.email_date
 ),
-payment as (  
-  select *, coalesce(payment_amount, bill_amount) as amount
+payment as (  -- temp solution for 0.9% null payment amount (263/28182)
+  select 
+    *, 
+    coalesce(payment_amount, bill_amount) as amount   -- temp solution for 0.9% null payment amount (263/28182)
   from (
     SELECT 
       lower(trim(p.account)) as billing_account,  p.id_subscrip,
