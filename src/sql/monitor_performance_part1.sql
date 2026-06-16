@@ -6,7 +6,6 @@
   -- Three-Offer Cohort: modeltype=PCHURN
     -- Treatment: MIDPOINT:CONTRO:TIERED=1:1:1
     -- TIERED: RISK1-5 maintain pchurn ratio.
--- check stop_save_test_applied_Bart is available for last friday
 
 -- create or replace table `gannett-datascience.test_results_zone.ss_test_result_v2`
 -- as
@@ -20,13 +19,17 @@ with cleanup as (
     stopsave as offered_rate, -- new calculated stopsave rate
     date(effective) as pricing_effective_date,
     if(modeltype='PCHURN', 'Three-Offer Cohort', 'Two-Offer Cohort') as cohort, 
-    grouptype,
+    case 
+      when grouptype='MIDPOINT' then 'Midpoint'
+      when grouptype='CONTROL' then 'Control'
+      else 'Tiered'
+    end as Treatment,
     case 
       when filedate = '2026-04-08' then date('2026-03-29')  -- filedate 4/8 uses inference_date 3/29
       when filedate = '2026-04-09' then date('2026-04-05')  -- filedate 4/9 uses inference_date 4/5
       else date_trunc(filedate, week(Sunday))               -- once per week going forward
     end as inference_date,
-    -- account, term, length, filedate, ebill, paymentmethod, product, reason, brandid, marketid, 
+    -- account, term, length, filedate, ebill, paymentmethod, product, reason, brandid, marketid, grouptype,
     -- pricegroup as int_of_currentrate
   FROM `gannett-datascience.test_results_zone.stop_save_test_applied_Bart`
 ),
@@ -62,15 +65,15 @@ ss_applied as (   -- link billing_account and id_subscrip
   and raw.inference_date = p.inference_date
   where raw.cohort = 'Three-Offer Cohort' 
 ),
-call_center as (  -- cancel attempts and confirmed cancels after email date 
+call_center as (  -- called in after email date 
   select distinct       
     ss_applied.billing_account,
     ss_applied.id_subscrip,
-    1 as called,
-    min(c.event_date) OVER (PARTITION BY ss_applied.billing_account, ss_applied.id_subscrip) as __call_attempt_date,
+    1 as called_in,
+    min(c.event_date) OVER (PARTITION BY ss_applied.billing_account, ss_applied.id_subscrip) as __called_in_date,
     min(cc.event_date) OVER (PARTITION BY ss_applied.billing_account, ss_applied.id_subscrip) as __call_cancel_date
   from ss_applied
-  join `gannett-datascience.test_activation_zone.ss_call_center` c on -- attempt to cancel
+  join `gannett-datascience.test_activation_zone.ss_call_center` c on -- called in
     ss_applied.billing_account = lower(trim(c.Account))
     and ss_applied.id_subscrip = c.idSubscrip
     and c.event_date >= ss_applied.email_date
@@ -80,17 +83,17 @@ call_center as (  -- cancel attempts and confirmed cancels after email date
   ) cc on
     ss_applied.billing_account = lower(trim(cc.Account))
     and ss_applied.id_subscrip = c.idSubscrip
-    and cc.event_date >= ss_applied.email_date
+    and cc.event_date >= ss_applied.email_date  
 ),
-online as (   -- first confirmed online cancel after email date
+online as (   -- opened online cancel page after email date
   select
     ss_applied.billing_account, 
     ss_applied.id_subscrip,
-    1 as opened_online_cancel,
-    min(c.event_date) OVER (PARTITION BY ss_applied.billing_account, ss_applied.id_subscrip) as __ol_attempt_date,
+    1 as opened_cancel_page,
+    min(c.event_date) OVER (PARTITION BY ss_applied.billing_account, ss_applied.id_subscrip) as __open_cancel_page_date,
     min(cc.event_date) OVER (PARTITION BY ss_applied.billing_account, ss_applied.id_subscrip) as __ol_cancel_date
   from ss_applied
-  join(  -- cancel attempt
+  join(  -- opened online cancel page
     select 
       id_subscrip, event_date, 
     from `gannett-datascience.test_activation_zone.ss_test_online_cancel_raw`
@@ -98,7 +101,7 @@ online as (   -- first confirmed online cancel after email date
   ) c on
     ss_applied.id_subscrip = c.id_subscrip
     and c.event_date >= ss_applied.email_date
-  left join (  -- raw online cancels
+  left join (  -- confirmed cancel online
     select
       id_subscrip, event_date, 
     from `gannett-datascience.test_activation_zone.ss_test_online_cancel_raw`
@@ -107,32 +110,22 @@ online as (   -- first confirmed online cancel after email date
     ss_applied.id_subscrip = cc.id_subscrip
     and cc.event_date >= ss_applied.email_date
 ),
+perm_stop as (
+  select
+    id_subscrip, 1 as perm_stoped, transaction_date as perm_stop_date, create_date
+  from `gannett-enterprise-data.consumers_rfz.subscriptions_trans_start_stop`
+  where is_perm_stop = 1
+),
 cb1 as (
   select distinct
     ss_applied.*, 
-    coalesce(c.called, 0) as call_attempt,
-    c.__call_attempt_date,
-    if(__call_cancel_date is null, 0, 1) as call_cencelled,
-    c.__call_cancel_date,
-    coalesce(o.opened_online_cancel, 0) as online_attempt,
-    o.__ol_attempt_date,
-    if(__ol_cancel_date is null, 0, 1) as online_canceled,
-    o.__ol_cancel_date,
-    case 
-      when c.__call_attempt_date is not null and o.__ol_attempt_date is not null
-      then least(c.__call_attempt_date, o.__ol_attempt_date)
-      else coalesce(c.__call_attempt_date, o.__ol_attempt_date)
-    end as least_attempt_date,
-    case 
-      when c.__call_cancel_date is not null and o.__ol_cancel_date is not null 
-      then least(c.__call_cancel_date, o.__ol_cancel_date)
-      else coalesce(c.__call_cancel_date, o.__ol_cancel_date)
-    end as least_cancel_date,
-    case 
-      when c.__call_cancel_date is not null and o.__ol_cancel_date is not null 
-      then greatest(c.__call_cancel_date, o.__ol_cancel_date)
-      else coalesce(c.__call_cancel_date, o.__ol_cancel_date)
-    end as greatest_cancel_date,
+    coalesce(c.called_in, 0) as called_in,
+    coalesce(o.opened_cancel_page, 0) as opened_cancel_page,
+    c.__called_in_date, o.__open_cancel_page_date, 
+    c.__call_cancel_date, o.__ol_cancel_date,
+    s.create_date as __create_date,
+    coalesce(s.perm_stoped, 0) as perm_stoped,
+    s.perm_stop_date
   from ss_applied
   left join call_center c on
     ss_applied.billing_account = c.billing_account
@@ -140,50 +133,64 @@ cb1 as (
   left join online o on
     ss_applied.billing_account = o.billing_account
     and ss_applied.id_subscrip = o.id_subscrip
+  left join perm_stop s on
+    ss_applied.id_subscrip = s.id_subscrip
+    and s.create_date >= ss_applied.email_date
 )
-select 
-  billing_account, id_subscrip,
-  email_date, pricing_effective_date,
-  current_rate, new_rate, offered_rate, 
-  cohort,
-  case 
-    when grouptype='MIDPOINT' then 'Midpoint'
-    when grouptype='CONTROL' then 'Control'
-    else 'Tiered'
-  end as Treatment,
-  call_attempt, __call_attempt_date, call_cencelled, __call_cancel_date,
-  online_attempt, __ol_attempt_date, online_canceled, __ol_cancel_date,
-  least_attempt_date, least_cancel_date, greatest_cancel_date,
-  cancel_types,
+select
+  b.*,
   case
-    when contains_substr(cancel_types, 'Call Center') then 'Call Center'
-    when contains_substr(cancel_types, 'Online') then 'Online'
-    else 'No Action yet'
-  end as Channel,
-  churned,
-  inference_date, src_risk_tier, pchurn_truth,
+    when __earlist_contact_date is null then 'No Action yet'
+    when perm_stoped=1 and __earlist_cancel_date is not null then 'stoped'
+    when perm_stoped=1 and __earlist_cancel_date is null then 'unknown stoped'
+    when perm_stoped=0 and __earlist_cancel_date is null then 'saved'
+    when perm_stoped=0 and __earlist_cancel_date is not null then 'unknown saved'
+    else 'others'
+  end as status,
+  case
+    when perm_stoped=1 and __earlist_cancel_date is not null then 1
+    when perm_stoped=0 and __earlist_cancel_date is null then 0
+    else null
+  end as churned,
+  y.risk_tier as src_risk_tier,
+  z.churn_truth as pchurn_truth,
+  if(__earlist_contact_date<pricing_effective_date, 'Contact Before Pricing', 'Contact On/After Pricing') as contact_timing
 from (
   select distinct
-    b.*, -- except(id_subscrip),
+    billing_account, id_subscrip,
+    cohort, Treatment,
+    email_date, pricing_effective_date,
+    current_rate, new_rate, offered_rate, 
+    called_in, opened_cancel_page, 
+    __called_in_date, __open_cancel_page_date, 
     case 
-      when call_attempt+online_attempt=0 then 'No action yet'
-      when call_cencelled+online_canceled=0 and call_attempt+online_attempt=2 
-        then if(__call_attempt_date>=__ol_attempt_date, 'Call Center Saved', 'Online Saved')
-      when call_cencelled+online_canceled=0 and call_attempt=1 then 'Call Center Saved'
-      when call_cencelled+online_canceled=0 and online_attempt=1 then 'Online Saved'
-      when call_cencelled+online_canceled=2 
-        then if(__call_cancel_date<=__ol_cancel_date, 'Call Center Cancelled', 'Online Cancelled')
-      when call_cencelled=1 then 'Call Center Cancelled'
-      else 'Online Cancelled'
-    end as cancel_types,
-    if(call_cencelled+online_canceled=0, 0, 1) as churned,
-    y.risk_tier as src_risk_tier,
-    z.churn_truth as pchurn_truth,
-  from cb1 b
-  left join `gannett-datascience.test_activation_zone.stop_save_test_Bart` y on
-    lower(trim(y.billing_account)) = lower(trim(b.billing_account)) 
-    and y.inference_date = b.inference_date
-  left join `gannett-enterprise-data.models_sz.source_pchurn_segments` z on
-    y.inference_date = z.inference_date
-    and y.id_subscrip = z.id_subscrip
-);
+      when called_in + opened_cancel_page=0 then 'No Action yet'
+      when called_in + opened_cancel_page=2 
+        then if(__called_in_date >= __open_cancel_page_date, 'Online first', 'Called-In first')
+      when called_in=1 then 'Called-In Cancel Flow'
+      else 'Online Cancel Flow'
+    end as contact_channel,
+    case 
+      when called_in + opened_cancel_page=2 then least(__called_in_date, __open_cancel_page_date)
+      else coalesce(__called_in_date, __open_cancel_page_date)
+    end as __earlist_contact_date,
+    __call_cancel_date, __ol_cancel_date,
+    case 
+      when __call_cancel_date is not null and __ol_cancel_date is not null 
+      then least(__call_cancel_date, __ol_cancel_date)
+      else coalesce(__call_cancel_date, __ol_cancel_date)
+    end as __earlist_cancel_date,
+    __create_date,
+    perm_stoped, perm_stop_date,
+    inference_date
+  from cb1
+) b
+left join `gannett-datascience.test_activation_zone.stop_save_test_Bart` y on
+  lower(trim(y.billing_account)) = lower(trim(b.billing_account)) 
+  and y.inference_date = b.inference_date
+left join `gannett-enterprise-data.models_sz.source_pchurn_segments` z on
+  y.inference_date = z.inference_date
+  and y.id_subscrip = z.id_subscrip;
+
+
+
