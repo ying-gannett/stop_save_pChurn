@@ -1,3 +1,6 @@
+import re
+from pathlib import Path
+
 from IPython.display import display
 import matplotlib.pyplot as plt
 import numpy as np
@@ -16,6 +19,202 @@ ORDERS = {
     "contact_timing": ['Contact Before Pricing', 'Contact On/After Pricing'],
     "repeatedly_called": [0, 1]
 }
+
+
+def __iter_chart_objects(chart):
+    if isinstance(chart, np.ndarray):
+        for item in chart.ravel():
+            yield from __iter_chart_objects(item)
+    elif isinstance(chart, (list, tuple)):
+        for item in chart:
+            yield from __iter_chart_objects(item)
+    else:
+        yield chart
+
+
+def __resolve_chart_figure(chart=None):
+    if chart is None:
+        return plt.gcf()
+
+    if hasattr(chart, "savefig") and hasattr(chart, "axes"):
+        return chart
+
+    for item in __iter_chart_objects(chart):
+        if hasattr(item, "savefig") and hasattr(item, "axes"):
+            return item
+        if hasattr(item, "figure"):
+            return item.figure
+
+    raise ValueError("chart must be a matplotlib Figure, Axes, axes array, or None.")
+
+
+def __common_prefix(values):
+    if not values:
+        return ""
+
+    first = values[0]
+    for idx, char in enumerate(first):
+        if any(idx >= len(value) or value[idx] != char for value in values[1:]):
+            return first[:idx]
+    return first
+
+
+def __common_suffix(values):
+    return __common_prefix([value[::-1] for value in values])[::-1]
+
+
+def __clean_common_title(title):
+    return title.strip().strip("-_|:,. ")
+
+
+def __resolve_subplot_title(titles):
+    if len(set(titles)) == 1:
+        return titles[0]
+
+    separators = ["\n\n", " | ", ": ", " - "]
+    for separator in separators:
+        split_titles = [title.split(separator) for title in titles]
+        shared_part_count = min(len(parts) for parts in split_titles)
+        if shared_part_count < 2:
+            continue
+
+        for idx in range(shared_part_count):
+            parts_at_idx = [parts[idx].strip() for parts in split_titles]
+            if len(set(parts_at_idx)) == 1 and parts_at_idx[0]:
+                return parts_at_idx[0]
+
+    prefix = __clean_common_title(__common_prefix(titles))
+    suffix = __clean_common_title(__common_suffix(titles))
+    if suffix.startswith("by "):
+        suffix = f"metrics {suffix}"
+
+    candidates = [candidate for candidate in [suffix, prefix] if len(candidate) >= 4]
+    return max(candidates, key=len) if candidates else "subplot_chart"
+
+
+def __resolve_chart_title(fig):
+    suptitle = getattr(fig, "_suptitle", None)
+    if suptitle is not None:
+        title = suptitle.get_text().strip()
+        if title:
+            return title
+
+    titles = [
+        ax.get_title().strip()
+        for ax in fig.axes
+        if ax.get_visible() and ax.get_title().strip()
+    ]
+
+    if not titles:
+        return "chart"
+    if len(titles) == 1:
+        return titles[0]
+    return __resolve_subplot_title(titles)
+
+
+def __slugify_file_name(value, max_length=120):
+    value = str(value).strip()
+    value = re.sub(r"[^\w\s.-]", "", value)
+    value = re.sub(r"[\s.-]+", "_", value)
+    value = value.strip("_")
+    return (value or "chart")[:max_length].rstrip("_")
+
+
+def __resolve_chart_path(folder, file_name, extension):
+    extension = extension.lstrip(".")
+    file_path = Path(file_name)
+    suffix = file_path.suffix or f".{extension}"
+    stem = __slugify_file_name(file_path.stem if file_path.suffix else file_path.name)
+    return Path(folder) / f"{stem}{suffix}"
+
+
+def __get_unique_path(path):
+    if not path.exists():
+        return path
+
+    counter = 1
+    while True:
+        candidate = path.with_name(f"{path.stem}_{counter}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
+def save_chart(
+    chart=None,
+    folder="charts",
+    file_name=None,
+    chart_title=None,
+    extension="png",
+    dpi=300,
+    bbox_inches="tight",
+    overwrite=True,
+    **savefig_kwargs,
+):
+    """Save a matplotlib chart using its title as the default file name."""
+    fig = __resolve_chart_figure(chart)
+    output_folder = Path(folder)
+    output_folder.mkdir(parents=True, exist_ok=True)
+
+    resolved_title = file_name or chart_title or __resolve_chart_title(fig)
+    output_path = __resolve_chart_path(output_folder, resolved_title, extension)
+    if not overwrite:
+        output_path = __get_unique_path(output_path)
+
+    fig.savefig(output_path, dpi=dpi, bbox_inches=bbox_inches, **savefig_kwargs)
+    return output_path
+
+
+def __finalize_chart(
+    chart,
+    show=False,
+    save=True,
+    chart_folder="charts",
+    file_name=None,
+    chart_title=None,
+    close=None,
+    save_kwargs=None,
+):
+    fig = __resolve_chart_figure(chart)
+    fig.tight_layout()
+
+    saved_path = None
+    if save:
+        saved_path = save_chart(
+            fig,
+            folder=chart_folder,
+            file_name=file_name,
+            chart_title=chart_title,
+            **(save_kwargs or {}),
+        )
+
+    if show:
+        plt.show()
+
+    should_close = not show if close is None else close
+    if should_close:
+        plt.close(fig)
+
+    return saved_path
+
+
+def __format_file_name_template(file_name, **values):
+    if file_name is None:
+        return None
+
+    try:
+        return str(file_name).format(**values)
+    except (KeyError, IndexError):
+        return file_name
+
+
+def __append_file_name_suffix(file_name, suffix):
+    path = Path(file_name)
+    suffix = __slugify_file_name(suffix)
+    if path.suffix:
+        return f"{path.stem}_{suffix}{path.suffix}"
+    return f"{path.name}_{suffix}"
+
 
 def cast_numeric_fields(data, numeric_fields):
     for field in numeric_fields:
@@ -130,7 +329,13 @@ def plot_one_metric_by_group(
     point_kwargs=None,
     display_counts_on_empty=False,
     ax=None,
-    show=True,
+    show=False,
+    save=True,
+    chart_folder="charts",
+    file_name=None,
+    chart_title=None,
+    close=None,
+    save_kwargs=None,
 ):
     required_cols = [metric, group_col, id_col]
     missing_cols = [col for col in required_cols if col not in data.columns]
@@ -149,7 +354,8 @@ def plot_one_metric_by_group(
             display(counts.rename("users").reset_index().sort_values("users", ascending=False))
         return None
 
-    if ax is None:
+    owns_figure = ax is None
+    if owns_figure:
         fig, ax = plt.subplots(figsize=figsize)
     else:
         fig = ax.figure
@@ -197,9 +403,17 @@ def plot_one_metric_by_group(
     ax.set_xlabel(xlabel or group_col)
     ax.set_ylabel(ylabel or metric)
 
-    if show:
-        fig.tight_layout()
-        plt.show()
+    if owns_figure:
+        __finalize_chart(
+            ax,
+            show=show,
+            save=save,
+            chart_folder=chart_folder,
+            file_name=file_name,
+            chart_title=chart_title or ax.get_title(),
+            close=close,
+            save_kwargs=save_kwargs,
+        )
 
     return ax
 
@@ -211,60 +425,174 @@ def plot_metrics_by_group(
     title_template=None,
     n_cols=2,
     figsize=(8, 5),
+    show=False,
+    save=True,
+    chart_folder="charts",
+    file_name=None,
+    chart_title=None,
+    close=None,
+    save_kwargs=None,
     **kwargs,
 ):
+    """Plot multiple metrics in one boxplot, with color grouped by group_col."""
     metrics = list(metrics)
     if not metrics:
         print("No metrics provided.")
         return None
 
-    if n_cols < 1:
-        raise ValueError("n_cols must be at least 1.")
+    order = kwargs.pop("order", None)
+    title = kwargs.pop("title", None)
+    xlabel = kwargs.pop("xlabel", "Metric")
+    ylabel = kwargs.pop("ylabel", "Value")
+    id_col = kwargs.pop("id_col", "billing_account")
+    min_n = kwargs.pop("min_n", 1)
+    show_counts = kwargs.pop("show_counts", True)
+    show_points = kwargs.pop("show_points", True)
+    showfliers = kwargs.pop("showfliers", True)
+    rotate_xticks = kwargs.pop("rotate_xticks", False)
+    point_kwargs = kwargs.pop("point_kwargs", None)
+    display_counts_on_empty = kwargs.pop("display_counts_on_empty", False)
+    palette = kwargs.pop("palette", None)
+    metric_label = kwargs.pop("metric_label", "metric")
+    value_label = kwargs.pop("value_label", "value")
+    boxplot_kwargs = kwargs.pop("boxplot_kwargs", {})
+    boxplot_kwargs.update(kwargs)
 
-    n_cols = min(n_cols, len(metrics))
-    n_rows = int(np.ceil(len(metrics) / n_cols))
-    fig, axes = plt.subplots(
-        n_rows,
-        n_cols,
-        figsize=(figsize[0] * n_cols, figsize[1] * n_rows),
-        squeeze=False,
-    )
-
-    plotted_axes = []
-    for metric, ax in zip(metrics, axes.flat):
-        title = None
-        if title_template is not None:
-            title = title_template.format(metric=metric, group_col=group_col)
-
-        plotted_ax = plot_one_metric_by_group(
-            data=data,
-            metric=metric,
-            group_col=group_col,
-            title=title,
-            ax=ax,
-            show=False,
-            **kwargs,
-        )
-
-        if plotted_ax is None:
-            ax.set_visible(False)
-        else:
-            plotted_axes.append(plotted_ax)
-
-    for ax in axes.flat[len(metrics):]:
-        ax.set_visible(False)
-
-    if not plotted_axes:
-        plt.close(fig)
-        print("No groups meet the minimum sample size.")
+    if group_col not in data.columns:
+        print(f"Missing required columns: ['{group_col}']")
         return None
 
-    fig.tight_layout()
-    plt.show()
-    return axes
+    available_metrics = [metric for metric in metrics if metric in data.columns]
+    missing_metrics = [metric for metric in metrics if metric not in data.columns]
+    if missing_metrics:
+        print(f"Missing metric columns skipped: {missing_metrics}")
+
+    if not available_metrics:
+        print("No metric columns available to plot.")
+        return None
+
+    plot_source = data.dropna(subset=[group_col]).copy()
+    plot_source = plot_source[plot_source[available_metrics].notna().any(axis=1)]
+
+    if id_col in plot_source.columns:
+        counts = __get_group_counts(plot_source, group_col, id_col=id_col)
+    else:
+        counts = plot_source.groupby(group_col, dropna=True).size()
+
+    resolved_order = __resolve_group_order(counts, order=order, min_n=min_n)
+    plot_source = plot_source[plot_source[group_col].isin(resolved_order)]
+
+    if plot_source.empty or not resolved_order:
+        if display_counts_on_empty:
+            print("No groups meet the minimum sample size.")
+            display(counts.rename("users").reset_index().sort_values("users", ascending=False))
+        return None
+
+    plot_df = plot_source.melt(
+        id_vars=[group_col],
+        value_vars=available_metrics,
+        var_name=metric_label,
+        value_name=value_label,
+    ).dropna(subset=[value_label])
+    plot_df[metric_label] = pd.Categorical(
+        plot_df[metric_label],
+        categories=available_metrics,
+        ordered=True,
+    )
+
+    if plot_df.empty:
+        print("No non-null metric values available to plot.")
+        return None
+
+    resolved_title = chart_title or title
+    if resolved_title is None and title_template is not None:
+        try:
+            resolved_title = title_template.format(metric="Metrics", group_col=group_col)
+        except (KeyError, IndexError):
+            resolved_title = title_template
+    if resolved_title is None:
+        resolved_title = f"Metrics by {group_col}"
+
+    fig, ax = plt.subplots(figsize=figsize)
+    sns.boxplot(
+        data=plot_df,
+        x=metric_label,
+        y=value_label,
+        hue=group_col,
+        hue_order=resolved_order,
+        palette=palette,
+        showfliers=showfliers,
+        ax=ax,
+        **boxplot_kwargs,
+    )
+
+    if show_points:
+        stripplot_kwargs = {
+            "alpha": 0.25,
+            "size": 3,
+            "jitter": 0.2,
+            "dodge": True,
+            "legend": False,
+        }
+        if point_kwargs is not None:
+            stripplot_kwargs.update(point_kwargs)
+
+        sns.stripplot(
+            data=plot_df,
+            x=metric_label,
+            y=value_label,
+            hue=group_col,
+            hue_order=resolved_order,
+            palette=palette,
+            ax=ax,
+            **stripplot_kwargs,
+        )
+
+    if rotate_xticks:
+        plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
+
+    ax.set_title(resolved_title)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+
+    legend = ax.get_legend()
+    if legend is not None:
+        legend.set_title(group_col)
+        if show_counts:
+            label_map = {
+                str(group): f"{group} (n={counts.loc[group]:,})"
+                for group in resolved_order
+            }
+            for text in legend.get_texts():
+                text.set_text(label_map.get(text.get_text(), text.get_text()))
+
+    __finalize_chart(
+        ax,
+        show=show,
+        save=save,
+        chart_folder=chart_folder,
+        file_name=file_name,
+        chart_title=resolved_title,
+        close=close,
+        save_kwargs=save_kwargs,
+    )
+    return ax
 
 
-def plot_histogram_with_log(data, metric, group, bins=50, figsize=(10, 5)):
+def plot_histogram_with_log(
+    data,
+    metric,
+    group,
+    bins=50,
+    figsize=(10, 5),
+    show=False,
+    save=True,
+    chart_folder="charts",
+    file_name=None,
+    chart_title=None,
+    close=None,
+    save_kwargs=None,
+):
     """Vis - Histogram
     Plot histogram of a metric and its log-transformed version side by side."""
     values = data[metric].dropna()
@@ -282,12 +610,34 @@ def plot_histogram_with_log(data, metric, group, bins=50, figsize=(10, 5)):
     axes[1].set_xlabel(f"log1p({metric})")
     axes[1].set_ylabel("Count")
 
-    plt.tight_layout()
-    plt.show()
+    __finalize_chart(
+        axes,
+        show=show,
+        save=save,
+        chart_folder=chart_folder,
+        file_name=file_name,
+        chart_title=chart_title or f"{metric} distribution | {group} users",
+        close=close,
+        save_kwargs=save_kwargs,
+    )
     return axes
 
 
-def plot_full_and_clipped_boxplot(data, metric, group, lower_q=0.01, upper_q=0.99, figsize=(10, 3)):
+def plot_full_and_clipped_boxplot(
+    data,
+    metric,
+    group,
+    lower_q=0.01,
+    upper_q=0.99,
+    figsize=(10, 3),
+    show=False,
+    save=True,
+    chart_folder="charts",
+    file_name=None,
+    chart_title=None,
+    close=None,
+    save_kwargs=None,
+):
     """Vis - Boxplot
     Plot boxplot of a metric and its clipped version side by side."""
     values = data[metric].dropna()
@@ -305,41 +655,186 @@ def plot_full_and_clipped_boxplot(data, metric, group, lower_q=0.01, upper_q=0.9
     axes[1].set_title(f"Box Plot of {metric}, Clipped to p01-p99 | {group} users")
     axes[1].set_xlabel(f"{metric} clipped to p01-p99")
 
-    plt.tight_layout()
-    plt.show()
+    __finalize_chart(
+        axes,
+        show=show,
+        save=save,
+        chart_folder=chart_folder,
+        file_name=file_name,
+        chart_title=chart_title or f"{metric} boxplot | {group} users",
+        close=close,
+        save_kwargs=save_kwargs,
+    )
     return axes
 
 
-def plot_scatter_pairs(data, pairs, sample_size=10000, random_state=42):
+def plot_correlation_heatmap(
+    data,
+    numeric_fields,
+    group=None,
+    figsize=(7, 5),
+    annot=True,
+    cmap="coolwarm",
+    center=0,
+    fmt=".2f",
+    show=False,
+    save=True,
+    chart_folder="charts",
+    file_name=None,
+    chart_title=None,
+    close=None,
+    save_kwargs=None,
+    **heatmap_kwargs,
+):
+    fields = [field for field in numeric_fields if field in data.columns]
+    if not fields:
+        print("No numeric fields available for correlation heatmap.")
+        return None
+
+    missing_fields = [field for field in numeric_fields if field not in data.columns]
+    if missing_fields:
+        print(f"Missing numeric fields skipped: {missing_fields}")
+
+    title = chart_title or (
+        f"Correlation Matrix | {group} users" if group is not None else "Correlation Matrix"
+    )
+
+    fig, ax = plt.subplots(figsize=figsize)
+    sns.heatmap(
+        data[fields].corr(),
+        annot=annot,
+        cmap=cmap,
+        center=center,
+        fmt=fmt,
+        ax=ax,
+        **heatmap_kwargs,
+    )
+    ax.set_title(title)
+
+    __finalize_chart(
+        ax,
+        show=show,
+        save=save,
+        chart_folder=chart_folder,
+        file_name=file_name,
+        chart_title=title,
+        close=close,
+        save_kwargs=save_kwargs,
+    )
+    return ax
+
+
+def plot_scatter_pairs(
+    data,
+    pairs,
+    sample_size=10000,
+    random_state=42,
+    figsize=(8, 5),
+    show=False,
+    save=True,
+    chart_folder="charts",
+    file_name=None,
+    chart_title=None,
+    close=None,
+    save_kwargs=None,
+):
     if data.empty:
         print("No rows available for scatter plots.")
-        return
+        return []
 
     sample_df = data.sample(min(sample_size, len(data)), random_state=random_state)
+    pairs = list(pairs)
+    saved_paths = []
+    plotted_count = 0
 
     for x_col, y_col in pairs:
         if x_col in sample_df.columns and y_col in sample_df.columns:
-            plt.figure(figsize=(8, 5))
-            sns.scatterplot(data=sample_df, x=x_col, y=y_col, alpha=0.3)
-            plt.title(f"{y_col} vs {x_col}")
-            plt.xlabel(x_col)
-            plt.ylabel(y_col)
-            plt.tight_layout()
-            plt.show()
+            plotted_count += 1
+            title = __format_file_name_template(
+                chart_title,
+                x_col=x_col,
+                y_col=y_col,
+                pair=f"{y_col}_vs_{x_col}",
+                index=plotted_count,
+            ) or f"{y_col} vs {x_col}"
+            fig, ax = plt.subplots(figsize=figsize)
+            sns.scatterplot(data=sample_df, x=x_col, y=y_col, alpha=0.3, ax=ax)
+            ax.set_title(title)
+            ax.set_xlabel(x_col)
+            ax.set_ylabel(y_col)
+
+            resolved_file_name = __format_file_name_template(
+                file_name,
+                x_col=x_col,
+                y_col=y_col,
+                pair=f"{y_col}_vs_{x_col}",
+                index=plotted_count,
+            )
+            if file_name is not None and resolved_file_name == file_name and len(pairs) > 1:
+                resolved_file_name = __append_file_name_suffix(
+                    file_name,
+                    f"{y_col}_vs_{x_col}",
+                )
+            elif file_name is None and chart_title is not None and len(pairs) > 1:
+                resolved_file_name = __append_file_name_suffix(
+                    title,
+                    f"{y_col}_vs_{x_col}",
+                )
+
+            saved_path = __finalize_chart(
+                ax,
+                show=show,
+                save=save,
+                chart_folder=chart_folder,
+                file_name=resolved_file_name,
+                chart_title=title,
+                close=close,
+                save_kwargs=save_kwargs,
+            )
+            if saved_path is not None:
+                saved_paths.append(saved_path)
+
+    if plotted_count == 0:
+        print("No valid scatter plot column pairs found.")
+
+    return saved_paths
 
 
-def plot_bucket_counts(data, bucket_col, dropna=False, figsize=(9, 5)):
+def plot_bucket_counts(
+    data,
+    bucket_col,
+    dropna=False,
+    figsize=(9, 5),
+    show=False,
+    save=True,
+    chart_folder="charts",
+    file_name=None,
+    chart_title=None,
+    close=None,
+    save_kwargs=None,
+):
     bucket_counts = data[bucket_col].value_counts(dropna=dropna).reset_index()
     bucket_counts.columns = [bucket_col, "count"]
 
-    plt.figure(figsize=figsize)
-    ax = sns.barplot(data=bucket_counts, x=bucket_col, y="count")
+    fig, ax = plt.subplots(figsize=figsize)
+    ax = sns.barplot(data=bucket_counts, x=bucket_col, y="count", ax=ax)
     ax.set_title(f"Distribution by {bucket_col}")
     ax.set_xlabel(bucket_col)
     ax.set_ylabel("Count")
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
-    plt.tight_layout()
-    plt.show()
+
+    saved_path = __finalize_chart(
+        ax,
+        show=show,
+        save=save,
+        chart_folder=chart_folder,
+        file_name=file_name,
+        chart_title=chart_title or ax.get_title(),
+        close=close,
+        save_kwargs=save_kwargs,
+    )
+    if saved_path is not None:
+        bucket_counts.attrs["saved_path"] = str(saved_path)
 
     return bucket_counts
 
@@ -363,6 +858,12 @@ def build_segment_combo_counts(
     id_col="billing_account",
     min_n=5,
     treatment_order=ORDERS["Treatment"],
+    show=False,
+    save=True,
+    chart_folder="charts",
+    file_name_template=None,
+    close=None,
+    save_kwargs=None,
 ):
     action_data = data[data["status"].ne(action_status)].copy()
     segment_combo_counts = (action_data
@@ -372,24 +873,35 @@ def build_segment_combo_counts(
     )
     display(segment_combo_counts.head(5))
 
-    plot_combo = segment_combo_counts.iloc[:, :4].drop_duplicates()
+    plot_combo = segment_combo_counts[slice_fields].drop_duplicates()
     print(f"Plotting {len(plot_combo)} unique segment combinations...")
-    for row in plot_combo.itertuples(index=False):
+    for combo_index, row in enumerate(plot_combo.itertuples(index=False), start=1):
         filters = row._asdict()
 
         plot_df = __apply_segment_filters(action_data, filters)
         title_filters = ", ".join(
-            f"{value}" for _, value in filters.items() if value is not None
+            f"{value}" for _, value in filters.items() if pd.notna(value)
         ) or "All action users"
+        file_name = __format_file_name_template(
+            file_name_template,
+            combo_index=combo_index,
+            segment_combo=title_filters,
+            **filters,
+        )
         plot_metrics_by_group(
             data=plot_df,
             metrics=metrics,
             group_col=group_col,
             order=treatment_order,
-            title_template=f"{title_filters}\n\n{{metric}} by {group_col}",
-            xlabel=group_col,
             min_n=min_n,
             figsize=(9, 5),
             display_counts_on_empty=False,
+            show=show,
+            save=save,
+            chart_folder=chart_folder,
+            file_name=file_name,
+            chart_title=f"{title_filters}\n\nMetrics by {group_col}",
+            close=close,
+            save_kwargs=save_kwargs,
         )
     return segment_combo_counts
