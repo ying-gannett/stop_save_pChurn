@@ -20,103 +20,7 @@ ORDERS = {
     "repeatedly_called": [0, 1]
 }
 
-
-def __iter_chart_objects(chart):
-    """Yield chart-like objects from nested axes arrays or sequences."""
-    if isinstance(chart, np.ndarray):
-        for item in chart.ravel():
-            yield from __iter_chart_objects(item)
-    elif isinstance(chart, (list, tuple)):
-        for item in chart:
-            yield from __iter_chart_objects(item)
-    else:
-        yield chart
-
-
-def __resolve_chart_figure(chart=None):
-    """Return the matplotlib Figure associated with a figure, axes, axes array, or current plot."""
-    if chart is None:
-        return plt.gcf()
-
-    if hasattr(chart, "savefig") and hasattr(chart, "axes"):
-        return chart
-
-    for item in __iter_chart_objects(chart):
-        if hasattr(item, "savefig") and hasattr(item, "axes"):
-            return item
-        if hasattr(item, "figure"):
-            return item.figure
-
-    raise ValueError("chart must be a matplotlib Figure, Axes, axes array, or None.")
-
-
-def __common_prefix(values):
-    """Return the shared leading substring across a list of strings."""
-    if not values:
-        return ""
-
-    first = values[0]
-    for idx, char in enumerate(first):
-        if any(idx >= len(value) or value[idx] != char for value in values[1:]):
-            return first[:idx]
-    return first
-
-
-def __common_suffix(values):
-    """Return the shared trailing substring across a list of strings."""
-    return __common_prefix([value[::-1] for value in values])[::-1]
-
-
-def __clean_common_title(title):
-    """Trim punctuation and whitespace from an inferred chart title."""
-    return title.strip().strip("-_|:,. ")
-
-
-def __resolve_subplot_title(titles):
-    """Infer one shared chart title from multiple subplot titles."""
-    if len(set(titles)) == 1:
-        return titles[0]
-
-    separators = ["\n\n", " | ", ": ", " - "]
-    for separator in separators:
-        split_titles = [title.split(separator) for title in titles]
-        shared_part_count = min(len(parts) for parts in split_titles)
-        if shared_part_count < 2:
-            continue
-
-        for idx in range(shared_part_count):
-            parts_at_idx = [parts[idx].strip() for parts in split_titles]
-            if len(set(parts_at_idx)) == 1 and parts_at_idx[0]:
-                return parts_at_idx[0]
-
-    prefix = __clean_common_title(__common_prefix(titles))
-    suffix = __clean_common_title(__common_suffix(titles))
-    if suffix.startswith("by "):
-        suffix = f"metrics {suffix}"
-
-    candidates = [candidate for candidate in [suffix, prefix] if len(candidate) >= 4]
-    return max(candidates, key=len) if candidates else "subplot_chart"
-
-
-def __resolve_chart_title(fig):
-    """Infer a chart title from a figure suptitle or visible axes titles."""
-    suptitle = getattr(fig, "_suptitle", None)
-    if suptitle is not None:
-        title = suptitle.get_text().strip()
-        if title:
-            return title
-
-    titles = [
-        ax.get_title().strip()
-        for ax in fig.axes
-        if ax.get_visible() and ax.get_title().strip()
-    ]
-
-    if not titles:
-        return "chart"
-    if len(titles) == 1:
-        return titles[0]
-    return __resolve_subplot_title(titles)
+# Chart output helpers
 
 
 def __slugify_file_name(value, max_length=120):
@@ -161,12 +65,20 @@ def save_chart(
     overwrite=True,
     **savefig_kwargs,
 ):
-    """Save a matplotlib chart using its title as the default file name."""
-    fig = __resolve_chart_figure(chart)
+    """Save a matplotlib figure using an explicit file name or chart title."""
+    if chart is None:
+        fig = plt.gcf()
+    elif hasattr(chart, "savefig"):
+        fig = chart
+    elif hasattr(chart, "figure"):
+        fig = chart.figure
+    else:
+        raise ValueError("chart must be a matplotlib Figure, Axes, or None.")
+
     output_folder = Path(folder)
     output_folder.mkdir(parents=True, exist_ok=True)
 
-    resolved_title = file_name or chart_title or __resolve_chart_title(fig)
+    resolved_title = file_name or chart_title or "chart"
     output_path = __resolve_chart_path(output_folder, resolved_title, extension)
     if not overwrite:
         output_path = __get_unique_path(output_path)
@@ -176,7 +88,7 @@ def save_chart(
 
 
 def __finalize_chart(
-    chart,
+    fig,
     show=False,
     save=True,
     chart_folder="charts",
@@ -186,7 +98,6 @@ def __finalize_chart(
     save_kwargs=None,
 ):
     """Apply layout, optionally save/show a chart, and close it when appropriate."""
-    fig = __resolve_chart_figure(chart)
     fig.tight_layout()
 
     saved_path = None
@@ -417,18 +328,19 @@ def plot_one_metric_by_group(
     elif rotate_xticks:
         plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
 
-    ax.set_title(title or f"{metric} by {group_col}")
+    resolved_title = chart_title or title or f"{metric} by {group_col}"
+    ax.set_title(resolved_title)
     ax.set_xlabel(xlabel or group_col)
     ax.set_ylabel(ylabel or metric)
 
     if owns_figure:
         __finalize_chart(
-            ax,
+            fig,
             show=show,
             save=save,
             chart_folder=chart_folder,
             file_name=file_name,
-            chart_title=chart_title or ax.get_title(),
+            chart_title=resolved_title,
             close=close,
             save_kwargs=save_kwargs,
         )
@@ -585,7 +497,7 @@ def plot_metrics_by_group(
                 text.set_text(label_map.get(text.get_text(), text.get_text()))
 
     __finalize_chart(
-        ax,
+        fig,
         show=show,
         save=save,
         chart_folder=chart_folder,
@@ -628,7 +540,7 @@ def plot_histogram_with_log(
     axes[1].set_ylabel("Count")
 
     __finalize_chart(
-        axes,
+        fig,
         show=show,
         save=save,
         chart_folder=chart_folder,
@@ -672,7 +584,7 @@ def plot_full_and_clipped_boxplot(
     axes[1].set_xlabel(f"{metric} clipped to p01-p99")
 
     __finalize_chart(
-        axes,
+        fig,
         show=show,
         save=save,
         chart_folder=chart_folder,
@@ -729,7 +641,7 @@ def plot_correlation_heatmap(
     ax.set_title(title)
 
     __finalize_chart(
-        ax,
+        fig,
         show=show,
         save=save,
         chart_folder=chart_folder,
@@ -800,7 +712,7 @@ def plot_scatter_pairs(
                 )
 
             saved_path = __finalize_chart(
-                ax,
+                fig,
                 show=show,
                 save=save,
                 chart_folder=chart_folder,
@@ -837,18 +749,19 @@ def plot_bucket_counts(
 
     fig, ax = plt.subplots(figsize=figsize)
     ax = sns.barplot(data=bucket_counts, x=bucket_col, y="count", ax=ax)
-    ax.set_title(f"Distribution by {bucket_col}")
+    title = chart_title or f"Distribution by {bucket_col}"
+    ax.set_title(title)
     ax.set_xlabel(bucket_col)
     ax.set_ylabel("Count")
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
 
     saved_path = __finalize_chart(
-        ax,
+        fig,
         show=show,
         save=save,
         chart_folder=chart_folder,
         file_name=file_name,
-        chart_title=chart_title or ax.get_title(),
+        chart_title=title,
         close=close,
         save_kwargs=save_kwargs,
     )
