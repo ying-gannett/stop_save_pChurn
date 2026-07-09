@@ -431,11 +431,11 @@ def plot_histogram_with_log(
 
 def plot_full_and_clipped_boxplot(
     data,
-    metric,
+    metrics,
     group,
     lower_q=0.01,
     upper_q=0.99,
-    figsize=(10, 3),
+    figsize=(10, 4),
     show=False,
     save=True,
     chart_folder="charts",
@@ -443,22 +443,55 @@ def plot_full_and_clipped_boxplot(
     chart_title=None,
     close=None,
     save_kwargs=None,
+    showfliers=True,
 ):
-    """Plot full and percentile-clipped boxplots for one numeric metric."""
-    values = data[metric].dropna()
-    lower = values.quantile(lower_q)
-    upper = values.quantile(upper_q)
-    clipped_values = values.clip(lower, upper)
+    """Plot original and percentile-clipped boxplots for multiple numeric metrics."""
+    metrics = list(metrics)
+    metric_values = data[metrics]
+    lower_bounds = metric_values.quantile(lower_q)
+    upper_bounds = metric_values.quantile(upper_q)
+    clipped_values = metric_values.clip(lower=lower_bounds, upper=upper_bounds, axis=1)
+
+    full_plot = metric_values.melt(var_name="metric", value_name="value").dropna()
+    clipped_plot = clipped_values.melt(var_name="metric", value_name="value").dropna()
+    for plot_df in [full_plot, clipped_plot]:
+        plot_df["metric"] = pd.Categorical(
+            plot_df["metric"],
+            categories=metrics,
+            ordered=True,
+        )
+
+    group_label = f" | {group} users"
+    clip_label = f"{lower_q:.0%}-{upper_q:.0%}"
+    title = chart_title or f"Metric boxplots{group_label}"
 
     fig, axes = plt.subplots(1, 2, figsize=figsize)
 
-    sns.boxplot(x=values, ax=axes[0])
-    axes[0].set_title(f"Box Plot of {metric} | {group} users")
-    axes[0].set_xlabel(metric)
+    sns.boxplot(
+        data=full_plot,
+        x="metric",
+        y="value",
+        showfliers=showfliers,
+        ax=axes[0],
+    )
+    axes[0].set_title(f"Original Values{group_label}")
+    axes[0].set_xlabel("Metric")
+    axes[0].set_ylabel("Value")
 
-    sns.boxplot(x=clipped_values, ax=axes[1])
-    axes[1].set_title(f"Box Plot of {metric}, Clipped to p01-p99 | {group} users")
-    axes[1].set_xlabel(f"{metric} clipped to p01-p99")
+    sns.boxplot(
+        data=clipped_plot,
+        x="metric",
+        y="value",
+        showfliers=showfliers,
+        ax=axes[1],
+    )
+    axes[1].set_title(f"Clipped Values ({clip_label}){group_label}")
+    axes[1].set_xlabel("Metric")
+    axes[1].set_ylabel("Value")
+    fig.suptitle(title)
+
+    for ax in axes:
+        plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
 
     __finalize_chart(
         fig,
@@ -466,7 +499,7 @@ def plot_full_and_clipped_boxplot(
         save=save,
         chart_folder=chart_folder,
         file_name=file_name,
-        chart_title=chart_title or f"{metric} boxplot | {group} users",
+        chart_title=title,
         close=close,
         save_kwargs=save_kwargs,
     )
