@@ -6,12 +6,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from typing import Any, Callable
 
 
 DEFAULT_PERCENTILES = [0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99]
 SLICE_FIELDS = ["contact_channels", "cohort", "src_risk_tier", "contact_timing"]
 ORDERS = {
-    "src_risk_tier": ['1. Low', '2. Med-Low', '3. Medium', '4. Med-High', '5. High'],
+    "src_risk_tier": ['1. Low risk', '2. Med-Low risk', '3. Medium risk', '4. Med-High risk', '5. High risk'],
     "cohort": ['Two-Offer Cohort', 'Three-Offer Cohort'],
     "Treatment": ["Control", "Midpoint", "Tiered"],
     "contact_channel": ['No Action yet', 'Called-In Cancel Flow', 'Online Cancel Flow', 'Called-In first', 'Online first'],
@@ -199,24 +200,18 @@ def build_outlier_summary(data, numeric_fields):
     return pd.DataFrame(outlier_summary)
 
 
-def build_segment_summary(data, segment, id_col="billing_account"):
+def build_segment_summary(data, segment, metrics, id_col="billing_account"):
     """Aggregate user counts and numeric metric summaries by one segment."""
+    # Allow the aggregation function to be a string or a lambda
+    agg_spec: dict[str, tuple[str, str | Callable[[Any], Any]]] = {"users": (id_col, "count")}
+    for metric in metrics:
+        agg_spec[f"avg_{metric}"] = (metric, "mean")
+        agg_spec[f"median_{metric}"] = (metric, "median")
+        agg_spec[f"p90_{metric}"] = (metric, lambda x: x.quantile(0.90))
+
     return (
         data.groupby(segment)
-        .agg(
-            users=(id_col, "count"),
-            avg_frequency=("frequency", "mean"),
-            median_frequency=("frequency", "median"),
-            p90_frequency=("frequency", lambda x: x.quantile(0.90)),
-            avg_breadth=("breadth", "mean"),
-            median_breadth=("breadth", "median"),
-            p90_breadth=("breadth", lambda x: x.quantile(0.90)),
-            avg_tenure=("tenure", "mean"),
-            median_tenure=("tenure", "median"),
-            avg_total_cost=("tt_cost", "mean"),
-            median_total_cost=("tt_cost", "median"),
-            p90_total_cost=("tt_cost", lambda x: x.quantile(0.90)),
-        )
+        .agg(**agg_spec)
         .reset_index()
         .sort_values("users", ascending=False)
     )
@@ -239,121 +234,10 @@ def __resolve_group_order(counts, order=None, min_n=1):
     return resolved_order
 
 
-def plot_one_metric_by_group(
-    data,
-    metric,
-    group_col,
-    order=None,
-    title=None,
-    xlabel=None,
-    ylabel=None,
-    id_col="billing_account",
-    min_n=1,
-    show_counts=True,
-    show_points=True,
-    showfliers=True,
-    rotate_xticks=False,
-    figsize=(8, 5),
-    point_kwargs=None,
-    display_counts_on_empty=False,
-    ax=None,
-    show=False,
-    save=True,
-    chart_folder="charts",
-    file_name=None,
-    chart_title=None,
-    close=None,
-    save_kwargs=None,
-):
-    """Plot one numeric metric as a boxplot across groups."""
-    required_cols = [metric, group_col, id_col]
-    missing_cols = [col for col in required_cols if col not in data.columns]
-    if missing_cols:
-        print(f"Missing required columns: {missing_cols}")
-        return None
-
-    plot_df = data.dropna(subset=[metric, group_col]).copy()
-    counts = __get_group_counts(plot_df, group_col, id_col=id_col)
-    resolved_order = __resolve_group_order(counts, order=order, min_n=min_n)
-    plot_df = plot_df[plot_df[group_col].isin(resolved_order)]
-
-    if plot_df.empty or not resolved_order:
-        if display_counts_on_empty:
-            print("No groups meet the minimum sample size.")
-            display(counts.rename("users").reset_index().sort_values("users", ascending=False))
-        return None
-
-    owns_figure = ax is None
-    if owns_figure:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
-
-    sns.boxplot(
-        data=plot_df,
-        x=group_col,
-        y=metric,
-        order=resolved_order,
-        showfliers=showfliers,
-        ax=ax,
-    )
-
-    if show_points:
-        stripplot_kwargs = {
-            "color": "black",
-            "alpha": 0.25,
-            "size": 3,
-            "jitter": 0.2,
-        }
-        if point_kwargs is not None:
-            stripplot_kwargs.update(point_kwargs)
-
-        sns.stripplot(
-            data=plot_df,
-            x=group_col,
-            y=metric,
-            order=resolved_order,
-            ax=ax,
-            **stripplot_kwargs,
-        )
-
-    if show_counts:
-        labels = [f"{group}\n(n={counts.loc[group]:,})" for group in resolved_order]
-        ax.set_xticks(range(len(resolved_order)))
-        ax.set_xticklabels(
-            labels,
-            rotation=45 if rotate_xticks else 0,
-            ha="right" if rotate_xticks else "center",
-        )
-    elif rotate_xticks:
-        plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
-
-    resolved_title = chart_title or title or f"{metric} by {group_col}"
-    ax.set_title(resolved_title)
-    ax.set_xlabel(xlabel or group_col)
-    ax.set_ylabel(ylabel or metric)
-
-    if owns_figure:
-        __finalize_chart(
-            fig,
-            show=show,
-            save=save,
-            chart_folder=chart_folder,
-            file_name=file_name,
-            chart_title=resolved_title,
-            close=close,
-            save_kwargs=save_kwargs,
-        )
-
-    return ax
-
-
 def plot_metrics_by_group(
     data,
     metrics,
     group_col,
-    title_template=None,
-    n_cols=2,
     figsize=(8, 5),
     show=False,
     save=True,
@@ -434,14 +318,7 @@ def plot_metrics_by_group(
         print("No non-null metric values available to plot.")
         return None
 
-    resolved_title = chart_title or title
-    if resolved_title is None and title_template is not None:
-        try:
-            resolved_title = title_template.format(metric="Metrics", group_col=group_col)
-        except (KeyError, IndexError):
-            resolved_title = title_template
-    if resolved_title is None:
-        resolved_title = f"Metrics by {group_col}"
+    resolved_title = chart_title or title or f"Metrics by {group_col}"
 
     fig, ax = plt.subplots(figsize=figsize)
     sns.boxplot(
