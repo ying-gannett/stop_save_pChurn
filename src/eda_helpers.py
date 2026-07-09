@@ -22,6 +22,7 @@ ORDERS = {
 
 
 def __iter_chart_objects(chart):
+    """Yield chart-like objects from nested axes arrays or sequences."""
     if isinstance(chart, np.ndarray):
         for item in chart.ravel():
             yield from __iter_chart_objects(item)
@@ -33,6 +34,7 @@ def __iter_chart_objects(chart):
 
 
 def __resolve_chart_figure(chart=None):
+    """Return the matplotlib Figure associated with a figure, axes, axes array, or current plot."""
     if chart is None:
         return plt.gcf()
 
@@ -49,6 +51,7 @@ def __resolve_chart_figure(chart=None):
 
 
 def __common_prefix(values):
+    """Return the shared leading substring across a list of strings."""
     if not values:
         return ""
 
@@ -60,14 +63,17 @@ def __common_prefix(values):
 
 
 def __common_suffix(values):
+    """Return the shared trailing substring across a list of strings."""
     return __common_prefix([value[::-1] for value in values])[::-1]
 
 
 def __clean_common_title(title):
+    """Trim punctuation and whitespace from an inferred chart title."""
     return title.strip().strip("-_|:,. ")
 
 
 def __resolve_subplot_title(titles):
+    """Infer one shared chart title from multiple subplot titles."""
     if len(set(titles)) == 1:
         return titles[0]
 
@@ -93,6 +99,7 @@ def __resolve_subplot_title(titles):
 
 
 def __resolve_chart_title(fig):
+    """Infer a chart title from a figure suptitle or visible axes titles."""
     suptitle = getattr(fig, "_suptitle", None)
     if suptitle is not None:
         title = suptitle.get_text().strip()
@@ -113,6 +120,7 @@ def __resolve_chart_title(fig):
 
 
 def __slugify_file_name(value, max_length=120):
+    """Convert a title or file name to a filesystem-friendly stem."""
     value = str(value).strip()
     value = re.sub(r"[^\w\s.-]", "", value)
     value = re.sub(r"[\s.-]+", "_", value)
@@ -121,6 +129,7 @@ def __slugify_file_name(value, max_length=120):
 
 
 def __resolve_chart_path(folder, file_name, extension):
+    """Build the output path for a chart file."""
     extension = extension.lstrip(".")
     file_path = Path(file_name)
     suffix = file_path.suffix or f".{extension}"
@@ -129,6 +138,7 @@ def __resolve_chart_path(folder, file_name, extension):
 
 
 def __get_unique_path(path):
+    """Return a non-existing path by appending a numeric suffix when needed."""
     if not path.exists():
         return path
 
@@ -175,6 +185,7 @@ def __finalize_chart(
     close=None,
     save_kwargs=None,
 ):
+    """Apply layout, optionally save/show a chart, and close it when appropriate."""
     fig = __resolve_chart_figure(chart)
     fig.tight_layout()
 
@@ -199,6 +210,7 @@ def __finalize_chart(
 
 
 def __format_file_name_template(file_name, **values):
+    """Render a file name template with known values when placeholders are present."""
     if file_name is None:
         return None
 
@@ -209,6 +221,7 @@ def __format_file_name_template(file_name, **values):
 
 
 def __append_file_name_suffix(file_name, suffix):
+    """Append a slugified suffix to a file name before its extension."""
     path = Path(file_name)
     suffix = __slugify_file_name(suffix)
     if path.suffix:
@@ -217,12 +230,14 @@ def __append_file_name_suffix(file_name, suffix):
 
 
 def cast_numeric_fields(data, numeric_fields):
+    """Cast selected columns to float64 in place and return the dataframe."""
     for field in numeric_fields:
         data[field] = data[field].astype("float64")
     return data
 
 
 def build_distribution_summary(data, numeric_fields, percentiles=DEFAULT_PERCENTILES):
+    """Summarize quality checks, standard deviation, and percentiles for numeric fields."""
     quality_checks = []
     for field in numeric_fields:
         quality_checks.append({
@@ -247,8 +262,7 @@ def build_distribution_summary(data, numeric_fields, percentiles=DEFAULT_PERCENT
 
 
 def build_outlier_summary(data, numeric_fields):
-    """Vis - Boxplot
-    Build a summary of outliers for numeric fields based on the IQR method."""
+    """Summarize IQR-based outlier counts and bounds for numeric fields."""
     outlier_summary = []
 
     for field in numeric_fields:
@@ -275,6 +289,7 @@ def build_outlier_summary(data, numeric_fields):
 
 
 def build_segment_summary(data, segment, id_col="billing_account"):
+    """Aggregate user counts and numeric metric summaries by one segment."""
     return (
         data.groupby(segment)
         .agg(
@@ -297,10 +312,12 @@ def build_segment_summary(data, segment, id_col="billing_account"):
 
 
 def __get_group_counts(data, group_col, id_col="billing_account", dropna=True):
+    """Count rows or accounts per group for plotting filters and labels."""
     return data.groupby(group_col, dropna=dropna)[id_col].count()
 
 
 def __resolve_group_order(counts, order=None, min_n=1):
+    """Resolve group display order after applying a minimum sample-size threshold."""
     valid_groups = counts[counts >= min_n].index.tolist()
 
     if order is None:
@@ -337,6 +354,7 @@ def plot_one_metric_by_group(
     close=None,
     save_kwargs=None,
 ):
+    """Plot one numeric metric as a boxplot across groups."""
     required_cols = [metric, group_col, id_col]
     missing_cols = [col for col in required_cols if col not in data.columns]
     if missing_cols:
@@ -434,7 +452,7 @@ def plot_metrics_by_group(
     save_kwargs=None,
     **kwargs,
 ):
-    """Plot multiple metrics in one boxplot, with color grouped by group_col."""
+    """Plot multiple numeric metrics in one grouped boxplot."""
     metrics = list(metrics)
     if not metrics:
         print("No metrics provided.")
@@ -593,8 +611,7 @@ def plot_histogram_with_log(
     close=None,
     save_kwargs=None,
 ):
-    """Vis - Histogram
-    Plot histogram of a metric and its log-transformed version side by side."""
+    """Plot raw and log1p histograms for one numeric metric."""
     values = data[metric].dropna()
     non_negative_values = values[values >= 0]
 
@@ -638,8 +655,7 @@ def plot_full_and_clipped_boxplot(
     close=None,
     save_kwargs=None,
 ):
-    """Vis - Boxplot
-    Plot boxplot of a metric and its clipped version side by side."""
+    """Plot full and percentile-clipped boxplots for one numeric metric."""
     values = data[metric].dropna()
     lower = values.quantile(lower_q)
     upper = values.quantile(upper_q)
@@ -686,6 +702,7 @@ def plot_correlation_heatmap(
     save_kwargs=None,
     **heatmap_kwargs,
 ):
+    """Plot a correlation heatmap for available numeric fields."""
     fields = [field for field in numeric_fields if field in data.columns]
     if not fields:
         print("No numeric fields available for correlation heatmap.")
@@ -738,6 +755,7 @@ def plot_scatter_pairs(
     close=None,
     save_kwargs=None,
 ):
+    """Plot and save scatter charts for selected numeric column pairs."""
     if data.empty:
         print("No rows available for scatter plots.")
         return []
@@ -813,6 +831,7 @@ def plot_bucket_counts(
     close=None,
     save_kwargs=None,
 ):
+    """Plot frequency counts for a categorical or bucketed column."""
     bucket_counts = data[bucket_col].value_counts(dropna=dropna).reset_index()
     bucket_counts.columns = [bucket_col, "count"]
 
@@ -840,6 +859,7 @@ def plot_bucket_counts(
 
 
 def __apply_segment_filters(data, filters):
+    """Filter a dataframe to rows matching a segment-combination dictionary."""
     filtered = data.copy()
 
     for col, value in filters.items():
@@ -865,6 +885,7 @@ def build_segment_combo_counts(
     close=None,
     save_kwargs=None,
 ):
+    """Count treatment users by segment combinations and plot each available slice."""
     action_data = data[data["status"].ne(action_status)].copy()
     segment_combo_counts = (action_data
         .groupby(slice_fields + [group_col], dropna=False)
