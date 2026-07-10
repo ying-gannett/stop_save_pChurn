@@ -1,4 +1,5 @@
 import unittest
+import warnings
 
 import matplotlib
 
@@ -14,16 +15,21 @@ from src import eda_helpers
 
 class MetricBoxplotViewsTests(unittest.TestCase):
     fit_reference = staticmethod(
-        getattr(eda_helpers, "__fit_global_metric_reference")
+        getattr(eda_helpers, "_fit_global_metric_reference")
     )
     prepare_boxplot_data = staticmethod(
-        getattr(eda_helpers, "__prepare_metric_boxplot_data")
+        getattr(eda_helpers, "_prepare_metric_boxplot_data")
     )
     resolve_palette = staticmethod(
-        getattr(eda_helpers, "__resolve_metric_group_palette")
+        getattr(eda_helpers, "_resolve_metric_group_palette")
     )
 
     def setUp(self):
+        warnings.filterwarnings(
+            "ignore",
+            message="vert: bool was deprecated.*",
+            category=matplotlib.MatplotlibDeprecationWarning,
+        )
         self.data = pd.DataFrame(
             {
                 "billing_account": [f"acct_{index:02d}" for index in range(12)],
@@ -117,7 +123,7 @@ class MetricBoxplotViewsTests(unittest.TestCase):
         np.testing.assert_array_equal(metric_values(standardized_plot), 0.0)
 
     def test_standalone_boxplot_function_renders_all_three_views(self):
-        axes = eda_helpers.plot_full_and_clipped_boxplot(
+        axes = eda_helpers.plot_metric_boxplot_views(
             self.data,
             metrics=self.metrics,
             group_col="Treatment",
@@ -173,6 +179,57 @@ class MetricBoxplotViewsTests(unittest.TestCase):
             ),
             custom_palette,
         )
+
+    def test_user_counts_are_unique_and_missing_segments_are_retained(self):
+        duplicated = pd.concat([self.data, self.data.iloc[[0]]], ignore_index=True)
+        duplicated.loc[len(duplicated)] = duplicated.iloc[1]
+        duplicated.loc[len(duplicated) - 1, "segment"] = np.nan
+
+        summary = eda_helpers.build_segment_summary(
+            duplicated,
+            "segment",
+            self.metrics,
+        )
+        segment_a_users = summary.loc[summary["segment"].eq("A"), "users"].item()
+        missing_segment_users = summary.loc[summary["segment"].isna(), "users"].item()
+        self.assertEqual(segment_a_users, 6)
+        self.assertEqual(missing_segment_users, 1)
+
+        prepared = self.prepare_boxplot_data(
+            duplicated,
+            self.metrics,
+            group_col="Treatment",
+            group_order=["Control", "Midpoint", "Tiered"],
+        )
+        group_counts = prepared[3]
+        self.assertEqual(group_counts["Control"], 4)
+
+    def test_outlier_percentage_uses_non_null_denominator(self):
+        summary = eda_helpers.build_outlier_summary(
+            pd.DataFrame({"metric": [1.0, 1.0, 1.0, 100.0, np.nan]}),
+            ["metric"],
+        ).iloc[0]
+
+        self.assertEqual(summary["row_count"], 5)
+        self.assertEqual(summary["non_null_count"], 4)
+        self.assertEqual(summary["outlier_count"], 1)
+        self.assertEqual(summary["outlier_pct"], 25.0)
+
+    def test_segment_plotter_does_not_filter_status_values(self):
+        data = self.data.copy()
+        data.loc[0, "status"] = "No Action yet"
+        counts = eda_helpers.plot_slices_of_segments_boxplot(
+            data,
+            metrics=self.metrics,
+            slice_fields=["status"],
+            group_col=None,
+            show_points=False,
+            show=False,
+            save=False,
+            close=True,
+        )
+
+        self.assertIn("No Action yet", counts["status"].tolist())
 
     def test_segment_outputs_share_separate_limits_across_pages(self):
         counts = eda_helpers.plot_slices_of_segments_boxplot(
@@ -238,6 +295,12 @@ class MetricBoxplotViewsTests(unittest.TestCase):
                 upper_q=0.1,
                 save=False,
             )
+
+    def test_legacy_boxplot_name_remains_an_alias(self):
+        self.assertIs(
+            eda_helpers.plot_full_and_clipped_boxplot,
+            eda_helpers.plot_metric_boxplot_views,
+        )
 
 
 if __name__ == "__main__":
