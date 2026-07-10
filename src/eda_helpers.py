@@ -464,6 +464,36 @@ def __apply_segment_filters(data, filters):
     return filtered
 
 
+def __fit_global_robust_metric_scale(
+    data,
+    metrics,
+    lower_q=0.01,
+    upper_q=0.99,
+):
+    """Fit per-metric robust scaling parameters from one reference population."""
+    if not 0 <= lower_q < upper_q <= 1:
+        raise ValueError("lower_q and upper_q must satisfy 0 <= lower_q < upper_q <= 1.")
+
+    metric_values = data[list(metrics)]
+    lower_bounds = metric_values.quantile(lower_q)
+    upper_bounds = metric_values.quantile(upper_q)
+    centers = metric_values.median()
+    spreads = metric_values.quantile(0.75) - metric_values.quantile(0.25)
+
+    # A constant or highly discrete metric can have a zero IQR. Use its clipped
+    # range as a fallback, and finally one to keep constant metrics well-defined.
+    fallback_spreads = upper_bounds - lower_bounds
+    spreads = spreads.mask(spreads.eq(0), fallback_spreads)
+    spreads = spreads.mask(spreads.eq(0), 1.0).fillna(1.0)
+
+    return {
+        "lower_bounds": lower_bounds,
+        "upper_bounds": upper_bounds,
+        "centers": centers,
+        "spreads": spreads,
+    }
+
+
 def __prepare_metric_boxplot_data(
     data,
     metrics,
@@ -474,6 +504,7 @@ def __prepare_metric_boxplot_data(
     id_col="billing_account",
     min_n=1,
     display_counts_on_empty=False,
+    metric_scale_params=None,
 ):
     """Prepare original and clipped long-form dataframes for metric boxplots."""
     metrics = list(metrics)
@@ -504,10 +535,29 @@ def __prepare_metric_boxplot_data(
                 )
             return None
 
-    metric_values = plot_source[metrics]
-    lower_bounds = metric_values.quantile(lower_q)
-    upper_bounds = metric_values.quantile(upper_q)
-    clipped_values = metric_values.clip(lower=lower_bounds, upper=upper_bounds, axis=1)
+    raw_metric_values = plot_source[metrics].astype("float64")
+    if metric_scale_params is None:
+        lower_bounds = raw_metric_values.quantile(lower_q)
+        upper_bounds = raw_metric_values.quantile(upper_q)
+        metric_values = raw_metric_values
+    else:
+        lower_bounds = metric_scale_params["lower_bounds"]
+        upper_bounds = metric_scale_params["upper_bounds"]
+        metric_values = raw_metric_values.sub(
+            metric_scale_params["centers"],
+            axis=1,
+        ).div(metric_scale_params["spreads"], axis=1)
+
+    clipped_values = raw_metric_values.clip(
+        lower=lower_bounds,
+        upper=upper_bounds,
+        axis=1,
+    )
+    if metric_scale_params is not None:
+        clipped_values = clipped_values.sub(
+            metric_scale_params["centers"],
+            axis=1,
+        ).div(metric_scale_params["spreads"], axis=1)
 
     if group_col is not None:
         metric_values = metric_values.assign(**{group_col: plot_source[group_col].values})
@@ -555,6 +605,8 @@ def __plot_metric_boxplot_axis(
     point_kwargs=None,
     rotate_xticks=True,
     boxplot_kwargs=None,
+    value_label="Value",
+    y_limits=None,
 ):
     """Plot one metric boxplot axis with optional grouped hue and points."""
     resolved_boxplot_kwargs = {
@@ -574,7 +626,9 @@ def __plot_metric_boxplot_axis(
     sns.boxplot(data=plot_df, ax=ax, **resolved_boxplot_kwargs)
     ax.set_title(title)
     ax.set_xlabel("Metric")
-    ax.set_ylabel("Value")
+    ax.set_ylabel(value_label)
+    if y_limits is not None:
+        ax.set_ylim(y_limits)
 
     if show_points:
         resolved_point_kwargs = {
@@ -667,6 +721,27 @@ def __resolve_paginated_file_name(file_name, page_number, total_pages):
     return __append_file_name_suffix(file_name, str(page_number))
 
 
+def __get_metric_boxplot_value_limits(panels, plot_key, padding_fraction=0.05):
+    """Return padded value limits shared by every panel and page of one plot type."""
+    values = pd.concat(
+        [panel[plot_key]["value"] for panel in panels],
+        ignore_index=True,
+    )
+    finite_values = pd.to_numeric(values, errors="coerce")
+    finite_values = finite_values[np.isfinite(finite_values)]
+    if finite_values.empty:
+        return None
+
+    lower = finite_values.min()
+    upper = finite_values.max()
+    value_range = upper - lower
+    if value_range == 0:
+        padding = max(abs(lower) * padding_fraction, 0.5)
+    else:
+        padding = value_range * padding_fraction
+    return lower - padding, upper + padding
+
+
 def __plot_metric_boxplot_panels(
     panels,
     plot_key,
@@ -687,6 +762,9 @@ def __plot_metric_boxplot_panels(
     point_kwargs=None,
     rotate_xticks=True,
     boxplot_kwargs=None,
+    sharey=False,
+    value_label="Value",
+    y_limits=None,
 ):
     """Plot one page of segment-slice metric boxplot panels."""
     if not panels:
@@ -695,7 +773,13 @@ def __plot_metric_boxplot_panels(
     n_cols = max(1, min(n_cols, len(panels)))
     n_rows = (len(panels) + n_cols - 1) // n_cols
     figsize = (panel_size[0] * n_cols, panel_size[1] * n_rows)
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize, squeeze=False)
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=figsize,
+        squeeze=False,
+        sharey=sharey,
+    )
     flat_axes = axes.ravel()
 
     for ax, panel in zip(flat_axes, panels):
@@ -711,6 +795,8 @@ def __plot_metric_boxplot_panels(
             point_kwargs=point_kwargs,
             rotate_xticks=rotate_xticks,
             boxplot_kwargs=boxplot_kwargs,
+            value_label=value_label,
+            y_limits=y_limits,
         )
         __format_metric_boxplot_legend(
             ax.get_legend(),
@@ -859,15 +945,43 @@ def plot_slices_of_segments_boxplot(
     rotate_xticks=True,
     display_counts_on_empty=False,
     boxplot_kwargs=None,
+    metric_scale="raw",
+    sharey=None,
 ):
-    """Plot segment slice boxplots as paginated full and clipped chart files."""
+    """Plot segment slice boxplots as paginated full and clipped chart files.
+
+    Set ``metric_scale="robust_global"`` to center every metric on its global
+    median and scale it by its global IQR. The same reference population and
+    clipping bounds are then used for every segment and treatment.
+    """
     if slices_per_file < 1:
         raise ValueError("slices_per_file must be at least 1.")
+    supported_metric_scales = {"raw", "robust_global"}
+    if metric_scale not in supported_metric_scales:
+        supported = ", ".join(sorted(supported_metric_scales))
+        raise ValueError(f"metric_scale must be one of: {supported}.")
+
+    metrics = list(metrics)
+    slice_fields = list(slice_fields)
+    resolved_sharey = (
+        metric_scale == "robust_global"
+        if sharey is None
+        else bool(sharey)
+    )
 
     if group_order is None and group_col == "Treatment":
         group_order = ORDERS["Treatment"]
 
     action_data = data[data["status"].ne(action_status)].copy()
+    metric_scale_params = None
+    if metric_scale == "robust_global":
+        metric_scale_params = __fit_global_robust_metric_scale(
+            action_data,
+            metrics,
+            lower_q=lower_q,
+            upper_q=upper_q,
+        )
+
     groupby_fields = list(slice_fields)
     if group_col is not None:
         groupby_fields += [group_col]
@@ -900,6 +1014,7 @@ def plot_slices_of_segments_boxplot(
             id_col=id_col,
             min_n=min_n,
             display_counts_on_empty=display_counts_on_empty,
+            metric_scale_params=metric_scale_params,
         )
         if prepared is None:
             continue
@@ -920,12 +1035,29 @@ def plot_slices_of_segments_boxplot(
     if not panels:
         print("No segment combinations available to plot.")
         segment_combo_counts.attrs["saved_paths"] = {"full": [], "clipped": []}
+        segment_combo_counts.attrs["metric_scale"] = metric_scale
         return segment_combo_counts
 
     total_pages = (len(panels) + slices_per_file - 1) // slices_per_file
     saved_paths = {"full": [], "clipped": []}
     clip_label = f"{lower_q:.0%}-{upper_q:.0%}"
     group_title = f" by {group_col}" if group_col is not None else ""
+    if metric_scale == "robust_global":
+        value_label = "Value relative to global median (IQR units)"
+        full_value_title = "Standardized full values"
+        clipped_value_title = f"Standardized clipped values ({clip_label})"
+    else:
+        value_label = "Value"
+        full_value_title = "Full values"
+        clipped_value_title = f"Clipped values ({clip_label})"
+
+    y_limits_by_plot = {"full_plot": None, "clipped_plot": None}
+    if resolved_sharey:
+        y_limits_by_plot = {
+            plot_key: __get_metric_boxplot_value_limits(panels, plot_key)
+            for plot_key in y_limits_by_plot
+        }
+
     common_panel_kwargs = {
         "group_col": group_col,
         "n_cols": n_cols,
@@ -942,6 +1074,8 @@ def plot_slices_of_segments_boxplot(
         "point_kwargs": point_kwargs,
         "rotate_xticks": rotate_xticks,
         "boxplot_kwargs": boxplot_kwargs,
+        "sharey": resolved_sharey,
+        "value_label": value_label,
     }
 
     for page_index in range(total_pages):
@@ -955,7 +1089,10 @@ def plot_slices_of_segments_boxplot(
                 "full",
                 "full_plot",
                 full_file_name,
-                f"Segment slice metric boxplots{group_title} | Full values{page_label}",
+                (
+                    f"Segment slice metric boxplots{group_title} | "
+                    f"{full_value_title}{page_label}"
+                ),
             ),
             (
                 "clipped",
@@ -963,7 +1100,7 @@ def plot_slices_of_segments_boxplot(
                 clipped_file_name,
                 (
                     f"Segment slice metric boxplots{group_title} | "
-                    f"Clipped values ({clip_label}){page_label}"
+                    f"{clipped_value_title}{page_label}"
                 ),
             ),
         ]
@@ -978,10 +1115,12 @@ def plot_slices_of_segments_boxplot(
                     page_number,
                     total_pages,
                 ),
+                y_limits=y_limits_by_plot[plot_key],
                 **common_panel_kwargs,
             )
             if saved_path is not None:
                 saved_paths[plot_type].append(str(saved_path))
 
     segment_combo_counts.attrs["saved_paths"] = saved_paths
+    segment_combo_counts.attrs["metric_scale"] = metric_scale
     return segment_combo_counts
