@@ -457,7 +457,9 @@ def __apply_segment_filters(data, filters):
     filtered = data.copy()
 
     for col, value in filters.items():
-        if not pd.isna(value):
+        if pd.isna(value):
+            filtered = filtered[filtered[col].isna()]
+        else:
             filtered = filtered[filtered[col].eq(value)]
 
     return filtered
@@ -627,7 +629,27 @@ def __format_grouped_boxplot_legend(
     if right_legend is None:
         return
 
-    right_legend.set_title(group_col)
+    __format_metric_boxplot_legend(
+        right_legend,
+        group_col,
+        group_counts,
+        group_order,
+        show_counts=show_counts,
+    )
+
+
+def __format_metric_boxplot_legend(
+    legend,
+    group_col,
+    group_counts,
+    group_order,
+    show_counts=True,
+):
+    """Format one grouped metric boxplot legend with optional group counts."""
+    if legend is None or group_col is None:
+        return
+
+    legend.set_title(group_col)
     if not show_counts:
         return
 
@@ -635,8 +657,84 @@ def __format_grouped_boxplot_legend(
         str(group_value): f"{group_value} (n={group_counts.loc[group_value]:,})"
         for group_value in group_order
     }
-    for text in right_legend.get_texts():
+    for text in legend.get_texts():
         text.set_text(label_map.get(text.get_text(), text.get_text()))
+
+
+def __resolve_paginated_file_name(file_name, page_number, total_pages):
+    """Append a page number to a file name when multiple pages are saved."""
+    if total_pages <= 1:
+        return file_name
+    return __append_file_name_suffix(file_name, str(page_number))
+
+
+def __plot_metric_boxplot_panels(
+    panels,
+    plot_key,
+    figure_title,
+    group_col=None,
+    n_cols=2,
+    panel_size=(7, 4),
+    show=False,
+    save=True,
+    chart_folder="charts",
+    file_name=None,
+    close=None,
+    save_kwargs=None,
+    showfliers=True,
+    palette=None,
+    show_counts=True,
+    show_points=True,
+    point_kwargs=None,
+    rotate_xticks=True,
+    boxplot_kwargs=None,
+):
+    """Plot one page of segment-slice metric boxplot panels."""
+    if not panels:
+        return None
+
+    n_cols = max(1, min(n_cols, len(panels)))
+    n_rows = (len(panels) + n_cols - 1) // n_cols
+    figsize = (panel_size[0] * n_cols, panel_size[1] * n_rows)
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize, squeeze=False)
+    flat_axes = axes.ravel()
+
+    for ax, panel in zip(flat_axes, panels):
+        __plot_metric_boxplot_axis(
+            ax,
+            panel[plot_key],
+            panel["title"],
+            group_col=group_col,
+            group_order=panel["group_order"],
+            showfliers=showfliers,
+            palette=palette,
+            show_points=show_points,
+            point_kwargs=point_kwargs,
+            rotate_xticks=rotate_xticks,
+            boxplot_kwargs=boxplot_kwargs,
+        )
+        __format_metric_boxplot_legend(
+            ax.get_legend(),
+            group_col,
+            panel["group_counts"],
+            panel["group_order"],
+            show_counts=show_counts,
+        )
+
+    for ax in flat_axes[len(panels):]:
+        ax.set_visible(False)
+
+    fig.suptitle(figure_title)
+    return __finalize_chart(
+        fig,
+        show=show,
+        save=save,
+        chart_folder=chart_folder,
+        file_name=file_name,
+        chart_title=figure_title,
+        close=close,
+        save_kwargs=save_kwargs,
+    )
 
 
 def plot_full_and_clipped_boxplot(
@@ -741,51 +839,180 @@ def plot_slices_of_segments_boxplot(
     action_status="No Action yet",
     id_col="billing_account",
     min_n=5,
-    treatment_order=ORDERS["Treatment"],
+    treatment_order=None,
+    group_order=None,
+    lower_q=0.01,
+    upper_q=0.99,
     show=False,
     save=True,
     chart_folder="charts",
     file_name_template=None,
     close=None,
     save_kwargs=None,
+    full_file_name="segment_slices_full.png",
+    clipped_file_name="segment_slices_clipped.png",
+    slices_per_file=6,
+    n_cols=2,
+    panel_size=(7, 4),
+    showfliers=True,
+    palette=None,
+    show_counts=True,
+    show_points=True,
+    point_kwargs=None,
+    rotate_xticks=True,
+    display_counts_on_empty=False,
+    boxplot_kwargs=None,
 ):
-    """Count treatment users by segment combinations and plot each available slice."""
+    """Plot segment slice boxplots as paginated full and clipped chart files."""
+    if slices_per_file < 1:
+        raise ValueError("slices_per_file must be at least 1.")
+
+    if group_order is None:
+        if treatment_order is not None:
+            group_order = treatment_order
+        elif group_col == "Treatment":
+            group_order = ORDERS["Treatment"]
+
     action_data = data[data["status"].ne(action_status)].copy()
+    groupby_fields = list(slice_fields)
+    if group_col is not None:
+        groupby_fields += [group_col]
+
     segment_combo_counts = (action_data
-        .groupby(slice_fields + [group_col], dropna=False)
+        .groupby(groupby_fields, dropna=False)
         .agg(users=(id_col, "count"))
         .reset_index()
     )
     display(segment_combo_counts.head(5))
 
     plot_combo = segment_combo_counts[slice_fields].drop_duplicates()
-    print(f"Plotting {len(plot_combo)} unique segment combinations...")
+    print(f"Preparing {len(plot_combo)} unique segment combinations...")
+    panels = []
     for combo_index, row in enumerate(plot_combo.itertuples(index=False), start=1):
         filters = row._asdict()
 
         plot_df = __apply_segment_filters(action_data, filters)
         title_filters = ", ".join(
-            f"{value}" for _, value in filters.items() if pd.notna(value)
+            f"{col}=Missing" if pd.isna(value) else f"{value}"
+            for col, value in filters.items()
         ) or "All action users"
-        file_name = __format_file_name_template(
-            file_name_template,
-            combo_index=combo_index,
-            segment_combo=title_filters,
-            **filters,
-        )
-        plot_full_and_clipped_boxplot(
+        prepared = __prepare_metric_boxplot_data(
             data=plot_df,
             metrics=metrics,
-            dataset_name=title_filters,
             group_col=group_col,
-            group_order=treatment_order,
+            group_order=group_order,
+            lower_q=lower_q,
+            upper_q=upper_q,
+            id_col=id_col,
             min_n=min_n,
+            display_counts_on_empty=display_counts_on_empty,
+        )
+        if prepared is None:
+            continue
+
+        full_plot, clipped_plot, group_counts, resolved_group_order = prepared
+        panels.append(
+            {
+                "title": title_filters,
+                "full_plot": full_plot,
+                "clipped_plot": clipped_plot,
+                "group_counts": group_counts,
+                "group_order": resolved_group_order,
+                "combo_index": combo_index,
+                "filters": filters,
+            }
+        )
+
+    if not panels:
+        print("No segment combinations available to plot.")
+        segment_combo_counts.attrs["saved_paths"] = {"full": [], "clipped": []}
+        return segment_combo_counts
+
+    if (
+        file_name_template is not None
+        and full_file_name == "segment_slices_full.png"
+        and clipped_file_name == "segment_slices_clipped.png"
+    ):
+        base_file_name = __format_file_name_template(
+            file_name_template,
+            combo_index="all",
+            segment_combo="all_slices",
+        )
+        full_file_name = __append_file_name_suffix(base_file_name, "full")
+        clipped_file_name = __append_file_name_suffix(base_file_name, "clipped")
+
+    total_pages = (len(panels) + slices_per_file - 1) // slices_per_file
+    saved_paths = {"full": [], "clipped": []}
+    clip_label = f"{lower_q:.0%}-{upper_q:.0%}"
+    group_title = f" by {group_col}" if group_col is not None else ""
+
+    for page_index in range(total_pages):
+        page_number = page_index + 1
+        page_panels = panels[
+            page_index * slices_per_file:(page_index + 1) * slices_per_file
+        ]
+        page_label = f" page {page_number}/{total_pages}" if total_pages > 1 else ""
+
+        full_title = f"Segment slice metric boxplots{group_title} | Full values{page_label}"
+        full_path = __plot_metric_boxplot_panels(
+            panels=page_panels,
+            plot_key="full_plot",
+            figure_title=full_title,
+            group_col=group_col,
+            n_cols=n_cols,
+            panel_size=panel_size,
             show=show,
             save=save,
             chart_folder=chart_folder,
-            file_name=file_name,
-            chart_title=f"{title_filters}\n\nMetric boxplots by {group_col}",
+            file_name=__resolve_paginated_file_name(
+                full_file_name,
+                page_number,
+                total_pages,
+            ),
             close=close,
             save_kwargs=save_kwargs,
+            showfliers=showfliers,
+            palette=palette,
+            show_counts=show_counts,
+            show_points=show_points,
+            point_kwargs=point_kwargs,
+            rotate_xticks=rotate_xticks,
+            boxplot_kwargs=boxplot_kwargs,
         )
+        if full_path is not None:
+            saved_paths["full"].append(str(full_path))
+
+        clipped_title = (
+            f"Segment slice metric boxplots{group_title} | "
+            f"Clipped values ({clip_label}){page_label}"
+        )
+        clipped_path = __plot_metric_boxplot_panels(
+            panels=page_panels,
+            plot_key="clipped_plot",
+            figure_title=clipped_title,
+            group_col=group_col,
+            n_cols=n_cols,
+            panel_size=panel_size,
+            show=show,
+            save=save,
+            chart_folder=chart_folder,
+            file_name=__resolve_paginated_file_name(
+                clipped_file_name,
+                page_number,
+                total_pages,
+            ),
+            close=close,
+            save_kwargs=save_kwargs,
+            showfliers=showfliers,
+            palette=palette,
+            show_counts=show_counts,
+            show_points=show_points,
+            point_kwargs=point_kwargs,
+            rotate_xticks=rotate_xticks,
+            boxplot_kwargs=boxplot_kwargs,
+        )
+        if clipped_path is not None:
+            saved_paths["clipped"].append(str(clipped_path))
+
+    segment_combo_counts.attrs["saved_paths"] = saved_paths
     return segment_combo_counts
