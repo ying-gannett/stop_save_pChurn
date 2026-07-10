@@ -733,7 +733,7 @@ def plot_full_and_clipped_boxplot(
     return axes
 
 
-def build_segment_combo_counts(
+def plot_slices_of_segments_boxplot(
     data,
     metrics,
     slice_fields,
