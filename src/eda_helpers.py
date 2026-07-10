@@ -234,158 +234,6 @@ def __resolve_group_order(counts, order=None, min_n=1):
     return resolved_order
 
 
-def plot_metrics_by_group(
-    data,
-    metrics,
-    group_col,
-    figsize=(8, 5),
-    show=False,
-    save=True,
-    chart_folder="charts",
-    file_name=None,
-    chart_title=None,
-    close=None,
-    save_kwargs=None,
-    **kwargs,
-):
-    """Plot multiple numeric metrics in one grouped boxplot."""
-    metrics = list(metrics)
-    if not metrics:
-        print("No metrics provided.")
-        return None
-
-    order = kwargs.pop("order", None)
-    title = kwargs.pop("title", None)
-    xlabel = kwargs.pop("xlabel", "Metric")
-    ylabel = kwargs.pop("ylabel", "Value")
-    id_col = kwargs.pop("id_col", "billing_account")
-    min_n = kwargs.pop("min_n", 1)
-    show_counts = kwargs.pop("show_counts", True)
-    show_points = kwargs.pop("show_points", True)
-    showfliers = kwargs.pop("showfliers", True)
-    rotate_xticks = kwargs.pop("rotate_xticks", False)
-    point_kwargs = kwargs.pop("point_kwargs", None)
-    display_counts_on_empty = kwargs.pop("display_counts_on_empty", False)
-    palette = kwargs.pop("palette", None)
-    metric_label = kwargs.pop("metric_label", "metric")
-    value_label = kwargs.pop("value_label", "value")
-    boxplot_kwargs = kwargs.pop("boxplot_kwargs", {})
-    boxplot_kwargs.update(kwargs)
-
-    if group_col not in data.columns:
-        print(f"Missing required columns: ['{group_col}']")
-        return None
-
-    available_metrics = [metric for metric in metrics if metric in data.columns]
-    missing_metrics = [metric for metric in metrics if metric not in data.columns]
-    if missing_metrics:
-        print(f"Missing metric columns skipped: {missing_metrics}")
-
-    if not available_metrics:
-        print("No metric columns available to plot.")
-        return None
-
-    plot_source = data.dropna(subset=[group_col]).copy()
-    plot_source = plot_source[plot_source[available_metrics].notna().any(axis=1)]
-
-    if id_col in plot_source.columns:
-        counts = __get_group_counts(plot_source, group_col, id_col=id_col)
-    else:
-        counts = plot_source.groupby(group_col, dropna=True).size()
-
-    resolved_order = __resolve_group_order(counts, order=order, min_n=min_n)
-    plot_source = plot_source[plot_source[group_col].isin(resolved_order)]
-
-    if plot_source.empty or not resolved_order:
-        if display_counts_on_empty:
-            print("No groups meet the minimum sample size.")
-            display(counts.rename("users").reset_index().sort_values("users", ascending=False))
-        return None
-
-    plot_df = plot_source.melt(
-        id_vars=[group_col],
-        value_vars=available_metrics,
-        var_name=metric_label,
-        value_name=value_label,
-    ).dropna(subset=[value_label])
-    plot_df[metric_label] = pd.Categorical(
-        plot_df[metric_label],
-        categories=available_metrics,
-        ordered=True,
-    )
-
-    if plot_df.empty:
-        print("No non-null metric values available to plot.")
-        return None
-
-    resolved_title = chart_title or title or f"Metrics by {group_col}"
-
-    fig, ax = plt.subplots(figsize=figsize)
-    sns.boxplot(
-        data=plot_df,
-        x=metric_label,
-        y=value_label,
-        hue=group_col,
-        hue_order=resolved_order,
-        palette=palette,
-        showfliers=showfliers,
-        ax=ax,
-        **boxplot_kwargs,
-    )
-
-    if show_points:
-        stripplot_kwargs = {
-            "alpha": 0.25,
-            "size": 3,
-            "jitter": 0.2,
-            "dodge": True,
-            "legend": False,
-        }
-        if point_kwargs is not None:
-            stripplot_kwargs.update(point_kwargs)
-
-        sns.stripplot(
-            data=plot_df,
-            x=metric_label,
-            y=value_label,
-            hue=group_col,
-            hue_order=resolved_order,
-            palette=palette,
-            ax=ax,
-            **stripplot_kwargs,
-        )
-
-    if rotate_xticks:
-        plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
-
-    ax.set_title(resolved_title)
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
-
-    legend = ax.get_legend()
-    if legend is not None:
-        legend.set_title(group_col)
-        if show_counts:
-            label_map = {
-                str(group): f"{group} (n={counts.loc[group]:,})"
-                for group in resolved_order
-            }
-            for text in legend.get_texts():
-                text.set_text(label_map.get(text.get_text(), text.get_text()))
-
-    __finalize_chart(
-        fig,
-        show=show,
-        save=save,
-        chart_folder=chart_folder,
-        file_name=file_name,
-        chart_title=resolved_title,
-        close=close,
-        save_kwargs=save_kwargs,
-    )
-    return ax
-
-
 def plot_histogram_with_log(
     data,
     metric,
@@ -423,83 +271,6 @@ def plot_histogram_with_log(
         chart_folder=chart_folder,
         file_name=file_name,
         chart_title=chart_title or f"{metric} distribution | {group} users",
-        close=close,
-        save_kwargs=save_kwargs,
-    )
-    return axes
-
-
-def plot_full_and_clipped_boxplot(
-    data,
-    metrics,
-    group,
-    lower_q=0.01,
-    upper_q=0.99,
-    figsize=(10, 4),
-    show=False,
-    save=True,
-    chart_folder="charts",
-    file_name=None,
-    chart_title=None,
-    close=None,
-    save_kwargs=None,
-    showfliers=True,
-):
-    """Plot original and percentile-clipped boxplots for multiple numeric metrics."""
-    metrics = list(metrics)
-    metric_values = data[metrics]
-    lower_bounds = metric_values.quantile(lower_q)
-    upper_bounds = metric_values.quantile(upper_q)
-    clipped_values = metric_values.clip(lower=lower_bounds, upper=upper_bounds, axis=1)
-
-    full_plot = metric_values.melt(var_name="metric", value_name="value").dropna()
-    clipped_plot = clipped_values.melt(var_name="metric", value_name="value").dropna()
-    for plot_df in [full_plot, clipped_plot]:
-        plot_df["metric"] = pd.Categorical(
-            plot_df["metric"],
-            categories=metrics,
-            ordered=True,
-        )
-
-    group_label = f" | {group} users"
-    clip_label = f"{lower_q:.0%}-{upper_q:.0%}"
-    title = chart_title or f"Metric boxplots{group_label}"
-
-    fig, axes = plt.subplots(1, 2, figsize=figsize)
-
-    sns.boxplot(
-        data=full_plot,
-        x="metric",
-        y="value",
-        showfliers=showfliers,
-        ax=axes[0],
-    )
-    axes[0].set_title(f"Original Values{group_label}")
-    axes[0].set_xlabel("Metric")
-    axes[0].set_ylabel("Value")
-
-    sns.boxplot(
-        data=clipped_plot,
-        x="metric",
-        y="value",
-        showfliers=showfliers,
-        ax=axes[1],
-    )
-    axes[1].set_title(f"Clipped Values ({clip_label}){group_label}")
-    axes[1].set_xlabel("Metric")
-    axes[1].set_ylabel("Value")
-    fig.suptitle(title)
-
-    for ax in axes:
-        plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
-
-    __finalize_chart(
-        fig,
-        show=show,
-        save=save,
-        chart_folder=chart_folder,
-        file_name=file_name,
-        chart_title=title,
         close=close,
         save_kwargs=save_kwargs,
     )
@@ -692,6 +463,197 @@ def __apply_segment_filters(data, filters):
     return filtered
 
 
+def plot_full_and_clipped_boxplot(
+    data,
+    metrics,
+    dataset_name=None,
+    group_col=None,
+    group_order=None,
+    lower_q=0.01,
+    upper_q=0.99,
+    figsize=(10, 4),
+    show=False,
+    save=True,
+    chart_folder="charts",
+    file_name=None,
+    chart_title=None,
+    close=None,
+    save_kwargs=None,
+    showfliers=True,
+    palette=None,
+    id_col="billing_account",
+    min_n=1,
+    show_counts=True,
+    show_points=False,
+    point_kwargs=None,
+    rotate_xticks=True,
+    display_counts_on_empty=False,
+    boxplot_kwargs=None,
+):
+    """Plot original and clipped metric boxplots, optionally grouped by hue."""
+    metrics = list(metrics)
+    plot_source = data.copy()
+    group_counts = pd.Series(dtype="int64")
+    resolved_group_order = []
+
+    if group_col is not None:
+        plot_source = plot_source.dropna(subset=[group_col])
+        if id_col in plot_source.columns:
+            group_counts = __get_group_counts(plot_source, group_col, id_col=id_col)
+        else:
+            group_counts = plot_source.groupby(group_col, dropna=True).size()
+
+        resolved_group_order = __resolve_group_order(
+            group_counts,
+            order=group_order,
+            min_n=min_n,
+        )
+        plot_source = plot_source[plot_source[group_col].isin(resolved_group_order)]
+        if plot_source.empty or not resolved_group_order:
+            print("No groups meet the minimum sample size.")
+            if display_counts_on_empty:
+                display(
+                    group_counts.rename("users")
+                    .reset_index()
+                    .sort_values("users", ascending=False)
+                )
+            return None
+
+    metric_values = plot_source[metrics]
+    lower_bounds = metric_values.quantile(lower_q)
+    upper_bounds = metric_values.quantile(upper_q)
+    clipped_values = metric_values.clip(lower=lower_bounds, upper=upper_bounds, axis=1)
+
+    if group_col is not None:
+        metric_values = metric_values.assign(**{group_col: plot_source[group_col].values})
+        clipped_values = clipped_values.assign(**{group_col: plot_source[group_col].values})
+        id_vars = [group_col]
+    else:
+        id_vars = None
+
+    full_plot = metric_values.melt(
+        id_vars=id_vars,
+        value_vars=metrics,
+        var_name="metric",
+        value_name="value",
+    ).dropna(subset=["value"])
+    clipped_plot = clipped_values.melt(
+        id_vars=id_vars,
+        value_vars=metrics,
+        var_name="metric",
+        value_name="value",
+    ).dropna(subset=["value"])
+
+    if full_plot.empty or clipped_plot.empty:
+        print("No non-null metric values available to plot.")
+        return None
+
+    for plot_df in [full_plot, clipped_plot]:
+        plot_df["metric"] = pd.Categorical(
+            plot_df["metric"],
+            categories=metrics,
+            ordered=True,
+        )
+
+    dataset_label = f" | {dataset_name} users" if dataset_name is not None else ""
+    clip_label = f"{lower_q:.0%}-{upper_q:.0%}"
+    group_title = f" by {group_col}" if group_col is not None else ""
+    title = chart_title or f"Metric boxplots{group_title}{dataset_label}"
+
+    fig, axes = plt.subplots(1, 2, figsize=figsize)
+
+    resolved_boxplot_kwargs = {
+        "x": "metric",
+        "y": "value",
+        "showfliers": showfliers,
+    }
+    if boxplot_kwargs is not None:
+        resolved_boxplot_kwargs.update(boxplot_kwargs)
+    if group_col is not None:
+        resolved_boxplot_kwargs.update(
+            hue=group_col,
+            hue_order=resolved_group_order,
+            palette=palette,
+        )
+
+    sns.boxplot(data=full_plot, ax=axes[0], **resolved_boxplot_kwargs)
+    axes[0].set_title(f"Original Values{dataset_label}")
+    axes[0].set_xlabel("Metric")
+    axes[0].set_ylabel("Value")
+
+    sns.boxplot(data=clipped_plot, ax=axes[1], **resolved_boxplot_kwargs)
+    axes[1].set_title(f"Clipped Values ({clip_label}){dataset_label}")
+    axes[1].set_xlabel("Metric")
+    axes[1].set_ylabel("Value")
+    fig.suptitle(title)
+
+    if show_points:
+        resolved_point_kwargs = {
+            "alpha": 0.25,
+            "size": 3,
+            "jitter": 0.2,
+        }
+        if group_col is not None:
+            resolved_point_kwargs.update(
+                hue=group_col,
+                hue_order=resolved_group_order,
+                palette=palette,
+                dodge=True,
+                legend=False,
+            )
+        else:
+            resolved_point_kwargs["color"] = "black"
+        if point_kwargs is not None:
+            resolved_point_kwargs.update(point_kwargs)
+
+        sns.stripplot(
+            data=full_plot,
+            x="metric",
+            y="value",
+            ax=axes[0],
+            **resolved_point_kwargs,
+        )
+        sns.stripplot(
+            data=clipped_plot,
+            x="metric",
+            y="value",
+            ax=axes[1],
+            **resolved_point_kwargs,
+        )
+
+    if rotate_xticks:
+        for ax in axes:
+            plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
+
+    if group_col is not None:
+        left_legend = axes[0].get_legend()
+        if left_legend is not None:
+            left_legend.remove()
+
+        right_legend = axes[1].get_legend()
+        if right_legend is not None:
+            right_legend.set_title(group_col)
+            if show_counts:
+                label_map = {
+                    str(group_value): f"{group_value} (n={group_counts.loc[group_value]:,})"
+                    for group_value in resolved_group_order
+                }
+                for text in right_legend.get_texts():
+                    text.set_text(label_map.get(text.get_text(), text.get_text()))
+
+    __finalize_chart(
+        fig,
+        show=show,
+        save=save,
+        chart_folder=chart_folder,
+        file_name=file_name,
+        chart_title=title,
+        close=close,
+        save_kwargs=save_kwargs,
+    )
+    return axes
+
+
 def build_segment_combo_counts(
     data,
     metrics,
@@ -732,19 +694,18 @@ def build_segment_combo_counts(
             segment_combo=title_filters,
             **filters,
         )
-        plot_metrics_by_group(
+        plot_full_and_clipped_boxplot(
             data=plot_df,
             metrics=metrics,
+            dataset_name=title_filters,
             group_col=group_col,
-            order=treatment_order,
+            group_order=treatment_order,
             min_n=min_n,
-            figsize=(9, 5),
-            display_counts_on_empty=False,
             show=show,
             save=save,
             chart_folder=chart_folder,
             file_name=file_name,
-            chart_title=f"{title_filters}\n\nMetrics by {group_col}",
+            chart_title=f"{title_filters}\n\nMetric boxplots by {group_col}",
             close=close,
             save_kwargs=save_kwargs,
         )
