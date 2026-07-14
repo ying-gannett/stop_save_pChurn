@@ -209,3 +209,5 @@ __marimo__/
 # Project specific
 data/
 .gemini/
+src/notebooks/charts/
+src/notebooks/tables/
