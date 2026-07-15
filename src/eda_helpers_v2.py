@@ -5,7 +5,6 @@ outcome-contrast matrices. All scores use one reference fitted on the complete
 contacted population so Saved and Stopped users remain directly comparable.
 """
 
-import re
 import textwrap
 from pathlib import Path
 
@@ -17,37 +16,22 @@ import seaborn as sns
 from src.eda_helpers import save_chart
 
 
-DEFAULT_OUTCOME_COLORS = {
-    "saved": "#2E8B57",
-    "stopped": "#C44E52",
-    "stoped": "#C44E52",
+ID_COL = "billing_account"
+OUTCOME_COL = "outcome"
+SAVED = "Saved"
+STOPPED = "Stopped"
+OUTCOMES = (SAVED, STOPPED)
+OUTCOME_COLORS = {
+    SAVED: "#2E8B57",
+    STOPPED: "#C44E52",
 }
 
 
-def _validate_quantiles(lower_q, upper_q):
-    if not 0 <= lower_q < upper_q <= 1:
-        raise ValueError(
-            "lower_q and upper_q must satisfy 0 <= lower_q < upper_q <= 1."
-        )
-
-
-def _metric_values(data, metrics):
-    return data[list(metrics)]
-
-
-def fit_behavior_reference(
-    data,
-    metrics,
-    lower_q=0.01,
-    upper_q=0.99,
-):
+def fit_behavior_reference(data, metrics):
     """Fit common clipping and robust-scaling values on all contacted users."""
-    metrics = list(metrics)
-    _validate_quantiles(lower_q, upper_q)
-
-    values = _metric_values(data, metrics)
-    lower_bounds = values.quantile(lower_q)
-    upper_bounds = values.quantile(upper_q)
+    values = data[metrics]
+    lower_bounds = values.quantile(0.01)
+    upper_bounds = values.quantile(0.99)
     centers = values.median()
     spreads = values.quantile(0.75) - values.quantile(0.25)
 
@@ -56,9 +40,6 @@ def fit_behavior_reference(
     spreads = spreads.mask(spreads.eq(0), 1.0).fillna(1.0)
 
     return {
-        "metrics": tuple(metrics),
-        "lower_q": lower_q,
-        "upper_q": upper_q,
         "lower_bounds": lower_bounds,
         "upper_bounds": upper_bounds,
         "centers": centers,
@@ -66,52 +47,29 @@ def fit_behavior_reference(
     }
 
 
-def transform_behavior_metrics(data, metrics, reference):
-    """Clip and scale metrics into contacted-population median/IQR units."""
-    metrics = list(metrics)
-    values = _metric_values(data, metrics)
-    clipped = values.clip(
+def _clip_metric_values(data, metrics, reference):
+    """Clip metrics to the common contacted-population bounds."""
+    return data[metrics].clip(
         lower=reference["lower_bounds"][metrics],
         upper=reference["upper_bounds"][metrics],
         axis=1,
     )
+
+
+def transform_behavior_metrics(data, metrics, reference):
+    """Clip and scale metrics into contacted-population median/IQR units."""
+    clipped = _clip_metric_values(data, metrics, reference)
     return clipped.sub(reference["centers"][metrics], axis=1).div(
         reference["spreads"][metrics],
         axis=1,
     )
 
 
-def _display_value(value):
-    if pd.isna(value):
-        return "Missing"
-    return str(value)
-
-
 def _segment_label(values, segment_fields):
-    return " · ".join(_display_value(values[field]) for field in segment_fields)
-
-
-def _iter_group_keys(data, segment_fields):
-    grouped = data.groupby(
-        segment_fields,
-        dropna=False,
-        observed=True,
-        sort=False,
+    return " · ".join(
+        "Missing" if pd.isna(values[field]) else str(values[field])
+        for field in segment_fields
     )
-    for key, group in grouped:
-        if len(segment_fields) == 1 and not isinstance(key, tuple):
-            key = (key,)
-        yield dict(zip(segment_fields, key)), group
-
-
-def _score_summary(score_values, metrics, prefix):
-    medians = score_values[list(metrics)].median()
-    return {f"{prefix}__{metric}": medians[metric] for metric in metrics}
-
-
-def _raw_median_summary(data, metrics, prefix="median"):
-    medians = data[list(metrics)].apply(pd.to_numeric, errors="coerce").median()
-    return {f"{prefix}__{metric}": medians[metric] for metric in metrics}
 
 
 def _vector_magnitude(values):
@@ -122,57 +80,46 @@ def _vector_magnitude(values):
     return float(np.sqrt(np.square(finite).sum()))
 
 
-def _dominant_metric(record, metrics, prefix):
-    available = {
-        metric: record[f"{prefix}__{metric}"]
-        for metric in metrics
-        if pd.notna(record[f"{prefix}__{metric}"])
-    }
-    if not available:
-        return None
-    return max(available, key=lambda metric: abs(available[metric]))
-
-
 def build_behavior_profiles(
     data,
     metrics,
     segment_fields,
     reference,
-    id_col="billing_account",
     min_n=20,
 ):
     """Summarize absolute segment profiles against one contacted-user reference."""
-    metrics = list(metrics)
-    segment_fields = list(segment_fields)
-    if not segment_fields:
-        raise ValueError("segment_fields must contain at least one column.")
-    if min_n < 1:
-        raise ValueError("min_n must be at least 1.")
-
-    working = data.reset_index(drop=True).copy()
+    working = data.reset_index(drop=True)
     scores = transform_behavior_metrics(working, metrics, reference)
-    score_columns = {metric: f"__behavior_score__{metric}" for metric in metrics}
-    working = working.join(scores.rename(columns=score_columns))
 
     records = []
-    for segment_values, group in _iter_group_keys(working, segment_fields):
-        users = group[id_col].nunique()
+    grouped = working.groupby(
+        segment_fields,
+        dropna=False,
+        observed=True,
+        sort=False,
+    )
+    for key, group in grouped:
+        if not isinstance(key, tuple):
+            key = (key,)
+        segment_values = dict(zip(segment_fields, key))
+        users = group[ID_COL].nunique()
         if users < min_n:
             continue
 
-        group_scores = group[[score_columns[metric] for metric in metrics]].rename(
-            columns={score_columns[metric]: metric for metric in metrics}
-        )
+        raw_medians = group[metrics].median()
+        score_medians = scores.loc[group.index, metrics].median()
+        finite_scores = score_medians.dropna()
         record = {
             **segment_values,
             "segment_label": _segment_label(segment_values, segment_fields),
             "users": users,
-            **_raw_median_summary(group, metrics),
-            **_score_summary(group_scores, metrics, "score"),
+            **{f"median__{metric}": raw_medians[metric] for metric in metrics},
+            **{f"score__{metric}": score_medians[metric] for metric in metrics},
+            "profile_magnitude": _vector_magnitude(score_medians),
+            "dominant_metric": (
+                finite_scores.abs().idxmax() if not finite_scores.empty else None
+            ),
         }
-        score_vector = [record[f"score__{metric}"] for metric in metrics]
-        record["profile_magnitude"] = _vector_magnitude(score_vector)
-        record["dominant_metric"] = _dominant_metric(record, metrics, "score")
         records.append(record)
 
     if not records:
@@ -187,90 +134,68 @@ def build_behavior_profiles(
     )
 
 
-def _column_token(value):
-    token = re.sub(r"[^a-z0-9]+", "_", str(value).strip().lower()).strip("_")
-    return token or "outcome"
-
-
 def build_outcome_contrasts(
     data,
     metrics,
     segment_fields,
     reference,
-    outcome_col="status",
-    outcomes=("saved", "stoped"),
-    id_col="billing_account",
     min_n=20,
 ):
-    """Compare two outcomes within identical business-defined segment slices.
-
-    Delta scores are the first outcome minus the second outcome in common
-    contacted-population IQR units.
-    """
-    metrics = list(metrics)
-    segment_fields = list(segment_fields)
-    outcomes = tuple(outcomes)
-    if not segment_fields:
-        raise ValueError("segment_fields must contain at least one column.")
-    if len(outcomes) != 2 or outcomes[0] == outcomes[1]:
-        raise ValueError("outcomes must contain two distinct values.")
-    if min_n < 1:
-        raise ValueError("min_n must be at least 1.")
-
-    filtered = data[data[outcome_col].isin(outcomes)].reset_index(drop=True).copy()
-    scores = transform_behavior_metrics(filtered, metrics, reference)
-    score_columns = {metric: f"__behavior_score__{metric}" for metric in metrics}
-    filtered = filtered.join(scores.rename(columns=score_columns))
-
-    outcome_tokens = tuple(_column_token(outcome) for outcome in outcomes)
+    """Compare Saved with Stopped users in matched segment slices."""
+    working = data.reset_index(drop=True)
+    scores = transform_behavior_metrics(working, metrics, reference)
 
     records = []
-    for segment_values, group in _iter_group_keys(filtered, segment_fields):
-        outcome_groups = {
-            outcome: group[group[outcome_col].eq(outcome)] for outcome in outcomes
-        }
-        outcome_counts = {
-            outcome: frame[id_col].nunique()
-            for outcome, frame in outcome_groups.items()
-        }
-        if any(count < min_n for count in outcome_counts.values()):
+    grouped = working.groupby(
+        segment_fields,
+        dropna=False,
+        observed=True,
+        sort=False,
+    )
+    for key, group in grouped:
+        if not isinstance(key, tuple):
+            key = (key,)
+        segment_values = dict(zip(segment_fields, key))
+        saved = group[group[OUTCOME_COL].eq(SAVED)]
+        stopped = group[group[OUTCOME_COL].eq(STOPPED)]
+        saved_n = saved[ID_COL].nunique()
+        stopped_n = stopped[ID_COL].nunique()
+        if saved_n < min_n or stopped_n < min_n:
             continue
 
+        saved_medians = saved[metrics].median()
+        stopped_medians = stopped[metrics].median()
+        saved_scores = scores.loc[saved.index, metrics].median()
+        stopped_scores = scores.loc[stopped.index, metrics].median()
+        deltas = saved_scores - stopped_scores
+        finite_deltas = deltas.dropna()
+        dominant_metric = (
+            finite_deltas.abs().idxmax() if not finite_deltas.empty else None
+        )
+        dominant_outcome = None
+        if dominant_metric is not None:
+            dominant_outcome = SAVED if deltas[dominant_metric] >= 0 else STOPPED
+        total_users = saved_n + stopped_n
         record = {
             **segment_values,
             "segment_label": _segment_label(segment_values, segment_fields),
+            "n__saved": saved_n,
+            "n__stopped": stopped_n,
+            **{
+                f"median_saved__{metric}": saved_medians[metric]
+                for metric in metrics
+            },
+            **{
+                f"median_stopped__{metric}": stopped_medians[metric]
+                for metric in metrics
+            },
+            **{f"delta__{metric}": deltas[metric] for metric in metrics},
+            "total_users": total_users,
+            "observed_saved_share": saved_n / total_users,
+            "contrast_magnitude": _vector_magnitude(deltas),
+            "dominant_metric": dominant_metric,
+            "dominant_outcome": dominant_outcome,
         }
-        score_medians = {}
-        for outcome, token in zip(outcomes, outcome_tokens):
-            frame = outcome_groups[outcome]
-            record[f"n__{token}"] = outcome_counts[outcome]
-            record.update(_raw_median_summary(frame, metrics, f"median_{token}"))
-            frame_scores = frame[
-                [score_columns[metric] for metric in metrics]
-            ].rename(columns={score_columns[metric]: metric for metric in metrics})
-            score_medians[outcome] = frame_scores.median()
-
-        for metric in metrics:
-            record[f"delta__{metric}"] = (
-                score_medians[outcomes[0]][metric]
-                - score_medians[outcomes[1]][metric]
-            )
-
-        total_users = sum(outcome_counts.values())
-        record["total_users"] = total_users
-        record[f"observed_{outcome_tokens[0]}_share"] = (
-            outcome_counts[outcomes[0]] / total_users
-        )
-        delta_vector = [record[f"delta__{metric}"] for metric in metrics]
-        record["contrast_magnitude"] = _vector_magnitude(delta_vector)
-        record["dominant_metric"] = _dominant_metric(record, metrics, "delta")
-        dominant_metric = record["dominant_metric"]
-        if dominant_metric is None:
-            record["dominant_outcome"] = None
-        elif record[f"delta__{dominant_metric}"] >= 0:
-            record["dominant_outcome"] = outcomes[0]
-        else:
-            record["dominant_outcome"] = outcomes[1]
         records.append(record)
 
     if not records:
@@ -288,17 +213,6 @@ def build_outcome_contrasts(
     )
 
 
-def _resolve_heatmap_limit(matrix, color_limit):
-    if color_limit is not None:
-        if color_limit <= 0:
-            raise ValueError("color_limit must be positive.")
-        return float(color_limit)
-
-    values = np.abs(matrix.to_numpy(dtype="float64"))
-    finite = values[np.isfinite(values)]
-    return max(float(finite.max()), 0.5) if finite.size else 0.5
-
-
 def _finalize_figure(
     fig,
     show,
@@ -306,7 +220,6 @@ def _finalize_figure(
     chart_folder,
     file_name,
     close,
-    save_kwargs,
     tight_layout_kwargs=None,
 ):
     fig.tight_layout(**(tight_layout_kwargs or {}))
@@ -316,7 +229,6 @@ def _finalize_figure(
             fig,
             folder=chart_folder,
             file_name=file_name,
-            **(save_kwargs or {}),
         )
     if show:
         plt.show()
@@ -331,40 +243,33 @@ def plot_behavior_profile_heatmap(
     metrics,
     max_rows=30,
     color_limit=2.0,
-    annotate=True,
     title="Behavior profiles relative to all contacted users",
-    cmap="vlag",
     show=False,
     save=True,
     chart_folder="charts",
     file_name="behavior_profiles_v2.png",
     close=None,
-    save_kwargs=None,
 ):
     """Plot absolute segment profile scores as a compact heatmap."""
-    metrics = list(metrics)
-    if max_rows is not None and max_rows < 1:
-        raise ValueError("max_rows must be at least 1 or None.")
-
-    plot_data = profiles if max_rows is None else profiles.head(max_rows)
+    plot_data = profiles.head(max_rows)
     matrix = plot_data[[f"score__{metric}" for metric in metrics]].copy()
     matrix.columns = metrics
     matrix.index = [
         f"{label}  (n={users:,})"
         for label, users in zip(plot_data["segment_label"], plot_data["users"])
     ]
-    limit = _resolve_heatmap_limit(matrix, color_limit)
+    limit = float(color_limit)
     fig_height = max(4.0, 0.42 * len(matrix) + 1.8)
     fig_width = max(8.0, 1.8 * len(metrics) + 5.5)
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
     sns.heatmap(
         matrix,
         ax=ax,
-        cmap=cmap,
+        cmap="vlag",
         center=0,
         vmin=-limit,
         vmax=limit,
-        annot=annotate,
+        annot=True,
         fmt=".2f",
         linewidths=0.5,
         linecolor="white",
@@ -382,7 +287,6 @@ def plot_behavior_profile_heatmap(
         chart_folder,
         file_name,
         close,
-        save_kwargs,
     )
     ax._saved_path = Path(saved_path) if saved_path is not None else None
     return ax
@@ -391,60 +295,45 @@ def plot_behavior_profile_heatmap(
 def plot_outcome_contrast_heatmap(
     contrasts,
     metrics,
-    outcomes,
     max_rows=20,
     color_limit=1.5,
-    annotate=True,
-    title=None,
-    cmap="vlag",
+    title="Behavior contrast: Saved minus Stopped",
     show=False,
     save=True,
     chart_folder="charts",
     file_name="saved_minus_stopped_profiles_v2.png",
     close=None,
-    save_kwargs=None,
 ):
     """Plot within-slice outcome differences in common IQR units."""
-    metrics = list(metrics)
-    outcomes = tuple(outcomes)
-    if max_rows is not None and max_rows < 1:
-        raise ValueError("max_rows must be at least 1 or None.")
-
-    tokens = tuple(_column_token(outcome) for outcome in outcomes)
-    count_columns = [f"n__{token}" for token in tokens]
-
-    plot_data = contrasts if max_rows is None else contrasts.head(max_rows)
+    plot_data = contrasts.head(max_rows)
     matrix = plot_data[[f"delta__{metric}" for metric in metrics]].copy()
     matrix.columns = metrics
     matrix.index = [
         f"{label}  (n={n_a:,}/{n_b:,})"
         for label, n_a, n_b in zip(
             plot_data["segment_label"],
-            plot_data[count_columns[0]],
-            plot_data[count_columns[1]],
+            plot_data["n__saved"],
+            plot_data["n__stopped"],
         )
     ]
-    limit = _resolve_heatmap_limit(matrix, color_limit)
+    limit = float(color_limit)
     fig_height = max(4.0, 0.48 * len(matrix) + 1.8)
     fig_width = max(8.0, 1.8 * len(metrics) + 5.5)
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
     sns.heatmap(
         matrix,
         ax=ax,
-        cmap=cmap,
+        cmap="vlag",
         center=0,
         vmin=-limit,
         vmax=limit,
-        annot=annotate,
+        annot=True,
         fmt=".2f",
         linewidths=0.5,
         linecolor="white",
-        cbar_kws={
-            "label": f"{outcomes[0]} minus {outcomes[1]} median (IQR units)"
-        },
+        cbar_kws={"label": "Saved minus Stopped median (IQR units)"},
     )
-    resolved_title = title or f"Behavior contrast: {outcomes[0]} minus {outcomes[1]}"
-    ax.set_title(resolved_title)
+    ax.set_title(title)
     ax.set_xlabel("Behavior metric")
     ax.set_ylabel("Matched segment")
     ax.tick_params(axis="x", rotation=0)
@@ -456,7 +345,6 @@ def plot_outcome_contrast_heatmap(
         chart_folder,
         file_name,
         close,
-        save_kwargs,
     )
     ax._saved_path = Path(saved_path) if saved_path is not None else None
     return ax
@@ -471,29 +359,6 @@ def _match_segment(data, segment_values, segment_fields):
         else:
             mask &= data[field].eq(value)
     return data[mask]
-
-
-def _resolve_outcome_palette(outcomes, palette):
-    if palette is not None:
-        return palette
-    return {
-        outcome: DEFAULT_OUTCOME_COLORS.get(
-            str(outcome).strip().lower(),
-            sns.color_palette("deep", n_colors=len(outcomes))[index],
-        )
-        for index, outcome in enumerate(outcomes)
-    }
-
-
-def _clip_metric_values(data, metrics, reference):
-    """Clip metric values using the common contacted-population reference."""
-    metrics = list(metrics)
-    values = _metric_values(data, metrics)
-    return values.clip(
-        lower=reference["lower_bounds"][metrics],
-        upper=reference["upper_bounds"][metrics],
-        axis=1,
-    )
 
 
 def _bootstrap_median_difference(
@@ -547,8 +412,6 @@ def build_selected_segment_detail_table(
     metrics,
     segment_fields,
     reference,
-    outcome_col="status",
-    outcomes=("saved", "stoped"),
     top_n=8,
     bootstrap_iterations=0,
     confidence_level=0.95,
@@ -560,20 +423,6 @@ def build_selected_segment_detail_table(
     quartiles, non-null counts, and optional bootstrap intervals are calculated
     from the account-level data.
     """
-    metrics = list(metrics)
-    segment_fields = list(segment_fields)
-    outcomes = tuple(outcomes)
-    if top_n < 1:
-        raise ValueError("top_n must be at least 1.")
-    if bootstrap_iterations < 0:
-        raise ValueError("bootstrap_iterations must be non-negative.")
-    if not 0 < confidence_level < 1:
-        raise ValueError("confidence_level must be between 0 and 1.")
-    if len(outcomes) != 2 or outcomes[0] == outcomes[1]:
-        raise ValueError("outcomes must contain two distinct values.")
-
-    outcome_tokens = tuple(_column_token(outcome) for outcome in outcomes)
-
     selected = contrasts.head(top_n).reset_index(drop=True).copy()
     selected.insert(0, "segment_rank", np.arange(1, len(selected) + 1))
     rng = np.random.default_rng(random_state)
@@ -581,9 +430,6 @@ def build_selected_segment_detail_table(
 
     for _, selected_segment in selected.iterrows():
         segment_data = _match_segment(data, selected_segment, segment_fields)
-        segment_data = segment_data[
-            segment_data[outcome_col].isin(outcomes)
-        ].copy()
         clipped_values = _clip_metric_values(segment_data, metrics, reference)
         base_record = {
             "segment_rank": selected_segment["segment_rank"],
@@ -591,19 +437,20 @@ def build_selected_segment_detail_table(
             **{field: selected_segment[field] for field in segment_fields},
         }
 
-        outcome_masks = {
-            outcome: segment_data[outcome_col].eq(outcome).to_numpy()
-            for outcome in outcomes
-        }
+        saved_mask = segment_data[OUTCOME_COL].eq(SAVED).to_numpy()
+        stopped_mask = segment_data[OUTCOME_COL].eq(STOPPED).to_numpy()
         for metric in metrics:
             record = {**base_record, "metric": metric}
             metric_arrays = {}
-            for outcome, token in zip(outcomes, outcome_tokens):
+            for token, mask in (
+                ("saved", saved_mask),
+                ("stopped", stopped_mask),
+            ):
                 metric_values = clipped_values.loc[
-                    outcome_masks[outcome],
+                    mask,
                     metric,
                 ].dropna()
-                metric_arrays[outcome] = metric_values.to_numpy()
+                metric_arrays[token] = metric_values.to_numpy()
                 q25 = metric_values.quantile(0.25)
                 q75 = metric_values.quantile(0.75)
                 raw_median = selected_segment[f"median_{token}__{metric}"]
@@ -629,19 +476,17 @@ def build_selected_segment_detail_table(
                     }
                 )
 
-            first_outcome, second_outcome = outcomes
-            first_token, second_token = outcome_tokens
             ci_lower, ci_upper = _bootstrap_median_difference(
-                metric_arrays[first_outcome],
-                metric_arrays[second_outcome],
+                metric_arrays["saved"],
+                metric_arrays["stopped"],
                 bootstrap_iterations,
                 confidence_level,
                 rng,
             )
             record.update(
                 clipped_median_difference=(
-                    record[f"clipped_median__{first_token}"]
-                    - record[f"clipped_median__{second_token}"]
+                    record["clipped_median__saved"]
+                    - record["clipped_median__stopped"]
                 ),
                 clipped_median_difference_ci_lower=ci_lower,
                 clipped_median_difference_ci_upper=ci_upper,
@@ -650,8 +495,7 @@ def build_selected_segment_detail_table(
             )
             records.append(record)
 
-    result = pd.DataFrame.from_records(records)
-    return result
+    return pd.DataFrame.from_records(records)
 
 
 def plot_selected_segment_clipped_boxplot_grid(
@@ -660,34 +504,16 @@ def plot_selected_segment_clipped_boxplot_grid(
     metrics,
     segment_fields,
     reference,
-    outcome_col="status",
-    outcomes=("saved", "stoped"),
     top_n=8,
-    palette=None,
-    show_points=False,
-    point_kwargs=None,
-    showfliers=True,
     panel_size=(3.0, 2.6),
-    title=None,
+    title="Raw clipped values for business magnitude",
     show=False,
     save=True,
     chart_folder="charts",
-    file_name=None,
+    file_name="selected_segments_raw_clipped_v2.png",
     close=None,
-    save_kwargs=None,
 ):
     """Plot clipped business-unit values for the selected contrast rows."""
-    metrics = list(metrics)
-    segment_fields = list(segment_fields)
-    outcomes = tuple(outcomes)
-    if top_n < 1:
-        raise ValueError("top_n must be at least 1.")
-    if len(outcomes) != 2 or outcomes[0] == outcomes[1]:
-        raise ValueError("outcomes must contain two distinct values.")
-
-    outcome_tokens = tuple(_column_token(outcome) for outcome in outcomes)
-    count_columns = [f"n__{token}" for token in outcome_tokens]
-
     selected = contrasts.head(top_n)
     n_rows = len(selected)
     n_cols = len(metrics)
@@ -698,60 +524,36 @@ def plot_selected_segment_clipped_boxplot_grid(
         sharey="col",
         squeeze=False,
     )
-    resolved_palette = _resolve_outcome_palette(outcomes, palette)
-    point_defaults = {"alpha": 0.35, "size": 2.5, "jitter": 0.15}
-    point_defaults.update(point_kwargs or {})
 
     for row_index, (_, selected_segment) in enumerate(selected.iterrows()):
         segment_data = _match_segment(data, selected_segment, segment_fields)
-        segment_data = segment_data[
-            segment_data[outcome_col].isin(outcomes)
-        ].copy()
         metric_values = _clip_metric_values(segment_data, metrics, reference)
-        counts = {
-            outcome: selected_segment[count_column]
-            for outcome, count_column in zip(outcomes, count_columns)
-        }
 
         for column_index, metric in enumerate(metrics):
             ax = axes[row_index, column_index]
             plot_data = pd.DataFrame(
                 {
-                    outcome_col: segment_data[outcome_col].to_numpy(),
+                    OUTCOME_COL: segment_data[OUTCOME_COL].to_numpy(),
                     "value": metric_values[metric].to_numpy(),
                 }
             ).dropna(subset=["value"])
             sns.boxplot(
                 data=plot_data,
-                x=outcome_col,
+                x=OUTCOME_COL,
                 y="value",
-                order=outcomes,
-                hue=outcome_col,
-                hue_order=outcomes,
-                palette=resolved_palette,
-                showfliers=showfliers,
+                order=OUTCOMES,
+                hue=OUTCOME_COL,
+                hue_order=OUTCOMES,
+                palette=OUTCOME_COLORS,
+                showfliers=True,
                 legend=False,
                 ax=ax,
             )
-            if show_points:
-                sns.stripplot(
-                    data=plot_data,
-                    x=outcome_col,
-                    y="value",
-                    order=outcomes,
-                    hue=outcome_col,
-                    hue_order=outcomes,
-                    palette=resolved_palette,
-                    dodge=False,
-                    legend=False,
-                    ax=ax,
-                    **point_defaults,
-                )
             ax.set_xticks(
-                range(len(outcomes)),
+                range(len(OUTCOMES)),
                 [
-                    f"{outcome}\nn={int(counts.get(outcome, 0)):,}"
-                    for outcome in outcomes
+                    f"{SAVED}\nn={int(selected_segment['n__saved']):,}",
+                    f"{STOPPED}\nn={int(selected_segment['n__stopped']):,}",
                 ],
             )
             ax.set_xlabel("")
@@ -775,17 +577,14 @@ def plot_selected_segment_clipped_boxplot_grid(
             else:
                 ax.set_ylabel("")
 
-    resolved_title = title or "Raw clipped values for business magnitude"
-    resolved_file_name = file_name or "selected_segments_raw_clipped_v2.png"
-    fig.suptitle(resolved_title, fontsize=15, y=0.995)
+    fig.suptitle(title, fontsize=15, y=0.995)
     saved_path = _finalize_figure(
         fig,
         show,
         save,
         chart_folder,
-        resolved_file_name,
+        file_name,
         close,
-        save_kwargs,
         tight_layout_kwargs={"rect": (0.22, 0, 1, 0.98), "h_pad": 1.2},
     )
     visible_axes = list(axes.ravel())
@@ -800,31 +599,17 @@ def plot_top_behavior_contrasts(
     metrics,
     segment_fields,
     reference,
-    outcome_col="status",
-    outcomes=("saved", "stoped"),
     top_n=8,
     n_cols=2,
     panel_size=(7, 4),
-    palette=None,
-    show_points=False,
-    point_kwargs=None,
-    title=None,
+    title="Top supported behavior contrasts: Saved vs Stopped",
     show=False,
     save=True,
     chart_folder="charts",
     file_name="top_behavior_contrasts_v2.png",
     close=None,
-    save_kwargs=None,
 ):
     """Drill into only the strongest supported outcome contrasts with boxplots."""
-    metrics = list(metrics)
-    segment_fields = list(segment_fields)
-    outcomes = tuple(outcomes)
-    if top_n < 1:
-        raise ValueError("top_n must be at least 1.")
-    if n_cols < 1:
-        raise ValueError("n_cols must be at least 1.")
-
     selected = contrasts.head(top_n)
     n_rows = int(np.ceil(len(selected) / n_cols))
     fig, axes = plt.subplots(
@@ -835,19 +620,15 @@ def plot_top_behavior_contrasts(
         squeeze=False,
     )
     flat_axes = axes.ravel()
-    resolved_palette = _resolve_outcome_palette(outcomes, palette)
-    point_defaults = {"alpha": 0.35, "size": 2.5, "jitter": 0.18}
-    point_defaults.update(point_kwargs or {})
 
     for panel_index, (_, contrast) in enumerate(selected.iterrows()):
         ax = flat_axes[panel_index]
         segment_data = _match_segment(data, contrast, segment_fields)
-        segment_data = segment_data[segment_data[outcome_col].isin(outcomes)].copy()
         scores = transform_behavior_metrics(segment_data, metrics, reference)
         long_data = scores.assign(
-            **{outcome_col: segment_data[outcome_col].to_numpy()}
+            **{OUTCOME_COL: segment_data[OUTCOME_COL].to_numpy()}
         ).melt(
-            id_vars=[outcome_col],
+            id_vars=[OUTCOME_COL],
             value_vars=metrics,
             var_name="metric",
             value_name="score",
@@ -856,29 +637,16 @@ def plot_top_behavior_contrasts(
             data=long_data,
             x="metric",
             y="score",
-            hue=outcome_col,
-            hue_order=outcomes,
-            palette=resolved_palette,
+            hue=OUTCOME_COL,
+            hue_order=OUTCOMES,
+            palette=OUTCOME_COLORS,
             showfliers=True,
             ax=ax,
         )
-        if show_points:
-            sns.stripplot(
-                data=long_data,
-                x="metric",
-                y="score",
-                hue=outcome_col,
-                hue_order=outcomes,
-                palette=resolved_palette,
-                dodge=True,
-                legend=False,
-                ax=ax,
-                **point_defaults,
-            )
-
-        counts = segment_data.groupby(outcome_col, observed=True).size()
+        counts = segment_data.groupby(OUTCOME_COL, observed=True)[ID_COL].nunique()
         count_text = " | ".join(
-            f"{outcome} n={int(counts.get(outcome, 0)):,}" for outcome in outcomes
+            f"{outcome} n={int(counts.get(outcome, 0)):,}"
+            for outcome in OUTCOMES
         )
         ax.set_title(f"{contrast['segment_label']}\n{count_text}", fontsize=10)
         ax.axhline(0, color="#666666", linewidth=0.8, linestyle="--")
@@ -890,13 +658,12 @@ def plot_top_behavior_contrasts(
             if legend is not None:
                 legend.remove()
         else:
-            ax.legend(title=outcome_col)
+            ax.legend(title=OUTCOME_COL)
 
     for ax in flat_axes[len(selected):]:
         ax.set_visible(False)
 
-    resolved_title = title or f"Top supported behavior contrasts: {outcomes[0]} vs {outcomes[1]}"
-    fig.suptitle(resolved_title, fontsize=15, y=1.01)
+    fig.suptitle(title, fontsize=15, y=1.01)
     saved_path = _finalize_figure(
         fig,
         show,
@@ -904,7 +671,6 @@ def plot_top_behavior_contrasts(
         chart_folder,
         file_name,
         close,
-        save_kwargs,
     )
     visible_axes = [ax for ax in flat_axes if ax.get_visible()]
     for ax in visible_axes:
