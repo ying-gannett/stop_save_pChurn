@@ -108,6 +108,14 @@ class BehaviorProfilingV2Tests(unittest.TestCase):
                 "segment_label",
             ].eq("Missing").all()
         )
+        with self.assertRaisesRegex(ValueError, "No behavior profiles"):
+            eda_helpers_v2.build_behavior_profiles(
+                self.data,
+                metrics=self.metrics,
+                segment_fields=["outcome"],
+                min_n=41,
+                reference=self.reference,
+            )
 
     def test_outcome_contrasts_are_matched_and_ranked(self):
         contrasts = eda_helpers_v2.build_outcome_contrasts(
@@ -128,16 +136,16 @@ class BehaviorProfilingV2Tests(unittest.TestCase):
         self.assertTrue(contrasts["observed_saved_share"].eq(0.5).all())
         self.assertTrue(contrasts["contrast_magnitude"].is_monotonic_decreasing)
 
-        filtered = eda_helpers_v2.build_outcome_contrasts(
-            self.data,
-            metrics=self.metrics,
-            segment_fields=self.segment_fields,
-            outcome_col="outcome",
-            outcomes=("Saved", "Stopped"),
-            min_n=11,
-            reference=self.reference,
-        )
-        self.assertTrue(filtered.empty)
+        with self.assertRaisesRegex(ValueError, "No matched outcome contrasts"):
+            eda_helpers_v2.build_outcome_contrasts(
+                self.data,
+                metrics=self.metrics,
+                segment_fields=self.segment_fields,
+                outcome_col="outcome",
+                outcomes=("Saved", "Stopped"),
+                min_n=11,
+                reference=self.reference,
+            )
 
     def test_heatmaps_and_selected_drilldowns_render(self):
         profiles = eda_helpers_v2.build_behavior_profiles(
@@ -167,6 +175,7 @@ class BehaviorProfilingV2Tests(unittest.TestCase):
         contrast_ax = eda_helpers_v2.plot_outcome_contrast_heatmap(
             contrasts,
             metrics=self.metrics,
+            outcomes=("Saved", "Stopped"),
             save=False,
             show=False,
             close=False,
@@ -213,8 +222,8 @@ class BehaviorProfilingV2Tests(unittest.TestCase):
             random_state=7,
         )
 
-        self.assertEqual(len(details.attrs["selected_segments"]), 2)
         self.assertEqual(len(details), 10)
+        self.assertEqual(set(details["segment_rank"]), {1, 2})
         self.assertTrue(details["n__saved"].eq(10).all())
         self.assertTrue(details["n__stopped"].eq(10).all())
         self.assertTrue(details["non_null__saved"].eq(10).all())
@@ -274,17 +283,6 @@ class BehaviorProfilingV2Tests(unittest.TestCase):
             [tick.get_text() for tick in clipped_axes[0].get_xticklabels()],
             ["Saved\nn=10", "Stopped\nn=10"],
         )
-
-    def test_duplicate_accounts_are_rejected(self):
-        duplicated = pd.concat([self.data, self.data.iloc[[0]]], ignore_index=True)
-        with self.assertRaisesRegex(ValueError, "must be unique"):
-            eda_helpers_v2.build_behavior_profiles(
-                duplicated,
-                metrics=self.metrics,
-                segment_fields=["outcome"],
-                reference=self.reference,
-            )
-
 
 if __name__ == "__main__":
     unittest.main()

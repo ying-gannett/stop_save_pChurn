@@ -24,25 +24,6 @@ DEFAULT_OUTCOME_COLORS = {
 }
 
 
-def _require_columns(data, columns):
-    """Raise a clear error when required columns are absent."""
-    missing = [column for column in columns if column not in data.columns]
-    if missing:
-        raise KeyError(f"Missing required columns: {missing}")
-
-
-def _validate_unique_accounts(data, id_col):
-    """Enforce the one-row-per-contacted-account profiling unit."""
-    if data.empty:
-        raise ValueError("Behavioral profiling data must not be empty.")
-    if data[id_col].isna().any():
-        raise ValueError(f"{id_col} must not contain missing values.")
-    if data[id_col].duplicated().any():
-        raise ValueError(
-            f"{id_col} must be unique; behavioral profiles use one row per account."
-        )
-
-
 def _validate_quantiles(lower_q, upper_q):
     if not 0 <= lower_q < upper_q <= 1:
         raise ValueError(
@@ -50,12 +31,8 @@ def _validate_quantiles(lower_q, upper_q):
         )
 
 
-def _numeric_metric_values(data, metrics):
-    values = data[list(metrics)].apply(pd.to_numeric, errors="coerce")
-    empty_metrics = values.columns[values.notna().sum().eq(0)].tolist()
-    if empty_metrics:
-        raise ValueError(f"Metrics contain no numeric observations: {empty_metrics}")
-    return values.astype("float64")
+def _metric_values(data, metrics):
+    return data[list(metrics)]
 
 
 def fit_behavior_reference(
@@ -66,10 +43,9 @@ def fit_behavior_reference(
 ):
     """Fit common clipping and robust-scaling values on all contacted users."""
     metrics = list(metrics)
-    _require_columns(data, metrics)
     _validate_quantiles(lower_q, upper_q)
 
-    values = _numeric_metric_values(data, metrics)
+    values = _metric_values(data, metrics)
     lower_bounds = values.quantile(lower_q)
     upper_bounds = values.quantile(upper_q)
     centers = values.median()
@@ -90,28 +66,10 @@ def fit_behavior_reference(
     }
 
 
-def _validate_behavior_reference(reference, metrics):
-    required_keys = {"lower_bounds", "upper_bounds", "centers", "spreads"}
-    missing_keys = required_keys.difference(reference)
-    if missing_keys:
-        raise KeyError(f"Behavior reference is missing keys: {sorted(missing_keys)}")
-
-    for key in required_keys:
-        missing_metrics = set(metrics).difference(reference[key].index)
-        if missing_metrics:
-            raise KeyError(
-                f"Behavior reference {key!r} is missing metrics: "
-                f"{sorted(missing_metrics)}"
-            )
-
-
 def transform_behavior_metrics(data, metrics, reference):
     """Clip and scale metrics into contacted-population median/IQR units."""
     metrics = list(metrics)
-    _require_columns(data, metrics)
-    _validate_behavior_reference(reference, metrics)
-
-    values = _numeric_metric_values(data, metrics)
+    values = _metric_values(data, metrics)
     clipped = values.clip(
         lower=reference["lower_bounds"][metrics],
         upper=reference["upper_bounds"][metrics],
@@ -179,11 +137,9 @@ def build_behavior_profiles(
     data,
     metrics,
     segment_fields,
+    reference,
     id_col="billing_account",
     min_n=20,
-    reference=None,
-    lower_q=0.01,
-    upper_q=0.99,
 ):
     """Summarize absolute segment profiles against one contacted-user reference."""
     metrics = list(metrics)
@@ -193,16 +149,7 @@ def build_behavior_profiles(
     if min_n < 1:
         raise ValueError("min_n must be at least 1.")
 
-    _require_columns(data, [id_col, *metrics, *segment_fields])
-    _validate_unique_accounts(data, id_col)
     working = data.reset_index(drop=True).copy()
-    if reference is None:
-        reference = fit_behavior_reference(
-            working,
-            metrics,
-            lower_q=lower_q,
-            upper_q=upper_q,
-        )
     scores = transform_behavior_metrics(working, metrics, reference)
     score_columns = {metric: f"__behavior_score__{metric}" for metric in metrics}
     working = working.join(scores.rename(columns=score_columns))
@@ -228,17 +175,16 @@ def build_behavior_profiles(
         record["dominant_metric"] = _dominant_metric(record, metrics, "score")
         records.append(record)
 
-    result = pd.DataFrame.from_records(records)
-    if not result.empty:
-        result = result.sort_values(
+    if not records:
+        raise ValueError(f"No behavior profiles meet min_n={min_n}.")
+    return (
+        pd.DataFrame.from_records(records)
+        .sort_values(
             ["profile_magnitude", "users"],
             ascending=[False, False],
-        ).reset_index(drop=True)
-    result.attrs["metric_reference"] = reference
-    result.attrs["metrics"] = tuple(metrics)
-    result.attrs["segment_fields"] = tuple(segment_fields)
-    result.attrs["min_n"] = min_n
-    return result
+        )
+        .reset_index(drop=True)
+    )
 
 
 def _column_token(value):
@@ -250,13 +196,11 @@ def build_outcome_contrasts(
     data,
     metrics,
     segment_fields,
+    reference,
     outcome_col="status",
     outcomes=("saved", "stoped"),
     id_col="billing_account",
     min_n=20,
-    reference=None,
-    lower_q=0.01,
-    upper_q=0.99,
 ):
     """Compare two outcomes within identical business-defined segment slices.
 
@@ -273,23 +217,12 @@ def build_outcome_contrasts(
     if min_n < 1:
         raise ValueError("min_n must be at least 1.")
 
-    _require_columns(data, [id_col, outcome_col, *metrics, *segment_fields])
     filtered = data[data[outcome_col].isin(outcomes)].reset_index(drop=True).copy()
-    _validate_unique_accounts(filtered, id_col)
-    if reference is None:
-        reference = fit_behavior_reference(
-            filtered,
-            metrics,
-            lower_q=lower_q,
-            upper_q=upper_q,
-        )
     scores = transform_behavior_metrics(filtered, metrics, reference)
     score_columns = {metric: f"__behavior_score__{metric}" for metric in metrics}
     filtered = filtered.join(scores.rename(columns=score_columns))
 
     outcome_tokens = tuple(_column_token(outcome) for outcome in outcomes)
-    if outcome_tokens[0] == outcome_tokens[1]:
-        raise ValueError("outcomes must resolve to distinct column labels.")
 
     records = []
     for segment_values, group in _iter_group_keys(filtered, segment_fields):
@@ -340,19 +273,19 @@ def build_outcome_contrasts(
             record["dominant_outcome"] = outcomes[1]
         records.append(record)
 
-    result = pd.DataFrame.from_records(records)
-    if not result.empty:
-        result = result.sort_values(
+    if not records:
+        raise ValueError(
+            "No matched outcome contrasts have at least "
+            f"min_n={min_n} users in both outcomes."
+        )
+    return (
+        pd.DataFrame.from_records(records)
+        .sort_values(
             ["contrast_magnitude", "total_users"],
             ascending=[False, False],
-        ).reset_index(drop=True)
-    result.attrs["metric_reference"] = reference
-    result.attrs["metrics"] = tuple(metrics)
-    result.attrs["segment_fields"] = tuple(segment_fields)
-    result.attrs["outcome_col"] = outcome_col
-    result.attrs["outcomes"] = outcomes
-    result.attrs["min_n"] = min_n
-    return result
+        )
+        .reset_index(drop=True)
+    )
 
 
 def _resolve_heatmap_limit(matrix, color_limit):
@@ -410,10 +343,6 @@ def plot_behavior_profile_heatmap(
 ):
     """Plot absolute segment profile scores as a compact heatmap."""
     metrics = list(metrics)
-    required = ["segment_label", "users", *[f"score__{m}" for m in metrics]]
-    _require_columns(profiles, required)
-    if profiles.empty:
-        raise ValueError("No behavior profiles are available to plot.")
     if max_rows is not None and max_rows < 1:
         raise ValueError("max_rows must be at least 1 or None.")
 
@@ -462,6 +391,7 @@ def plot_behavior_profile_heatmap(
 def plot_outcome_contrast_heatmap(
     contrasts,
     metrics,
+    outcomes,
     max_rows=20,
     color_limit=1.5,
     annotate=True,
@@ -476,20 +406,12 @@ def plot_outcome_contrast_heatmap(
 ):
     """Plot within-slice outcome differences in common IQR units."""
     metrics = list(metrics)
-    required = [
-        "segment_label",
-        *[f"delta__{metric}" for metric in metrics],
-    ]
-    _require_columns(contrasts, required)
-    if contrasts.empty:
-        raise ValueError("No outcome contrasts are available to plot.")
+    outcomes = tuple(outcomes)
     if max_rows is not None and max_rows < 1:
         raise ValueError("max_rows must be at least 1 or None.")
 
-    outcomes = contrasts.attrs.get("outcomes", ("Outcome A", "Outcome B"))
     tokens = tuple(_column_token(outcome) for outcome in outcomes)
     count_columns = [f"n__{token}" for token in tokens]
-    _require_columns(contrasts, count_columns)
 
     plot_data = contrasts if max_rows is None else contrasts.head(max_rows)
     matrix = plot_data[[f"delta__{metric}" for metric in metrics]].copy()
@@ -566,8 +488,7 @@ def _resolve_outcome_palette(outcomes, palette):
 def _clip_metric_values(data, metrics, reference):
     """Clip metric values using the common contacted-population reference."""
     metrics = list(metrics)
-    values = _numeric_metric_values(data, metrics)
-    _validate_behavior_reference(reference, metrics)
+    values = _metric_values(data, metrics)
     return values.clip(
         lower=reference["lower_bounds"][metrics],
         upper=reference["upper_bounds"][metrics],
@@ -628,7 +549,6 @@ def build_selected_segment_detail_table(
     reference,
     outcome_col="status",
     outcomes=("saved", "stoped"),
-    id_col="billing_account",
     top_n=8,
     bootstrap_iterations=0,
     confidence_level=0.95,
@@ -653,20 +573,6 @@ def build_selected_segment_detail_table(
         raise ValueError("outcomes must contain two distinct values.")
 
     outcome_tokens = tuple(_column_token(outcome) for outcome in outcomes)
-    if outcome_tokens[0] == outcome_tokens[1]:
-        raise ValueError("outcomes must resolve to distinct column labels.")
-    contrast_columns = ["segment_label", *segment_fields]
-    for token in outcome_tokens:
-        contrast_columns.append(f"n__{token}")
-        contrast_columns.extend(
-            f"median_{token}__{metric}" for metric in metrics
-        )
-    _require_columns(data, [id_col, outcome_col, *metrics, *segment_fields])
-    _require_columns(contrasts, contrast_columns)
-    _validate_unique_accounts(data, id_col)
-    _validate_behavior_reference(reference, metrics)
-    if contrasts.empty:
-        raise ValueError("No outcome contrasts are available for a detail table.")
 
     selected = contrasts.head(top_n).reset_index(drop=True).copy()
     selected.insert(0, "segment_rank", np.arange(1, len(selected) + 1))
@@ -745,9 +651,6 @@ def build_selected_segment_detail_table(
             records.append(record)
 
     result = pd.DataFrame.from_records(records)
-    result.attrs["selected_segments"] = selected
-    result.attrs["outcomes"] = outcomes
-    result.attrs["metrics"] = tuple(metrics)
     return result
 
 
@@ -759,7 +662,6 @@ def plot_selected_segment_clipped_boxplot_grid(
     reference,
     outcome_col="status",
     outcomes=("saved", "stoped"),
-    id_col="billing_account",
     top_n=8,
     palette=None,
     show_points=False,
@@ -784,18 +686,7 @@ def plot_selected_segment_clipped_boxplot_grid(
         raise ValueError("outcomes must contain two distinct values.")
 
     outcome_tokens = tuple(_column_token(outcome) for outcome in outcomes)
-    if outcome_tokens[0] == outcome_tokens[1]:
-        raise ValueError("outcomes must resolve to distinct column labels.")
     count_columns = [f"n__{token}" for token in outcome_tokens]
-    _require_columns(data, [id_col, outcome_col, *metrics, *segment_fields])
-    _require_columns(
-        contrasts,
-        ["segment_label", *segment_fields, *count_columns],
-    )
-    _validate_behavior_reference(reference, metrics)
-    _validate_unique_accounts(data, id_col)
-    if contrasts.empty:
-        raise ValueError("No outcome contrasts are available for a boxplot grid.")
 
     selected = contrasts.head(top_n)
     n_rows = len(selected)
@@ -933,10 +824,6 @@ def plot_top_behavior_contrasts(
         raise ValueError("top_n must be at least 1.")
     if n_cols < 1:
         raise ValueError("n_cols must be at least 1.")
-    _require_columns(data, [outcome_col, *metrics, *segment_fields])
-    _require_columns(contrasts, ["segment_label", *segment_fields])
-    if contrasts.empty:
-        raise ValueError("No outcome contrasts are available for drill-down plots.")
 
     selected = contrasts.head(top_n)
     n_rows = int(np.ceil(len(selected) / n_cols))
