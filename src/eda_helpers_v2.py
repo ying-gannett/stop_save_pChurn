@@ -6,6 +6,7 @@ contacted population so Saved and Stopped users remain directly comparable.
 """
 
 import re
+import textwrap
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -373,8 +374,9 @@ def _finalize_figure(
     file_name,
     close,
     save_kwargs,
+    tight_layout_kwargs=None,
 ):
-    fig.tight_layout()
+    fig.tight_layout(**(tight_layout_kwargs or {}))
     saved_path = None
     if save:
         saved_path = save_chart(
@@ -559,6 +561,346 @@ def _resolve_outcome_palette(outcomes, palette):
         )
         for index, outcome in enumerate(outcomes)
     }
+
+
+def _clip_metric_values(data, metrics, reference):
+    """Clip metric values using the common contacted-population reference."""
+    metrics = list(metrics)
+    values = _numeric_metric_values(data, metrics)
+    _validate_behavior_reference(reference, metrics)
+    return values.clip(
+        lower=reference["lower_bounds"][metrics],
+        upper=reference["upper_bounds"][metrics],
+        axis=1,
+    )
+
+
+def _bootstrap_median_difference(
+    first_values,
+    second_values,
+    iterations,
+    confidence_level,
+    rng,
+):
+    """Return a percentile bootstrap interval for an independent median difference."""
+    first_values = np.asarray(first_values, dtype="float64")
+    second_values = np.asarray(second_values, dtype="float64")
+    first_values = first_values[np.isfinite(first_values)]
+    second_values = second_values[np.isfinite(second_values)]
+    if not first_values.size or not second_values.size or iterations < 1:
+        return np.nan, np.nan
+
+    max_sample_size = max(first_values.size, second_values.size)
+    batch_size = max(1, min(iterations, 1_000_000 // max_sample_size))
+    bootstrap_differences = np.empty(iterations, dtype="float64")
+    for start in range(0, iterations, batch_size):
+        stop = min(start + batch_size, iterations)
+        current_batch_size = stop - start
+        first_indices = rng.integers(
+            0,
+            first_values.size,
+            size=(current_batch_size, first_values.size),
+        )
+        first_medians = np.median(first_values[first_indices], axis=1)
+        del first_indices
+        second_indices = rng.integers(
+            0,
+            second_values.size,
+            size=(current_batch_size, second_values.size),
+        )
+        bootstrap_differences[start:stop] = first_medians - np.median(
+            second_values[second_indices],
+            axis=1,
+        )
+    tail_probability = (1 - confidence_level) / 2
+    lower, upper = np.quantile(
+        bootstrap_differences,
+        [tail_probability, 1 - tail_probability],
+    )
+    return float(lower), float(upper)
+
+
+def build_selected_segment_detail_table(
+    data,
+    contrasts,
+    metrics,
+    segment_fields,
+    reference,
+    outcome_col="status",
+    outcomes=("saved", "stoped"),
+    id_col="billing_account",
+    top_n=8,
+    bootstrap_iterations=0,
+    confidence_level=0.95,
+    random_state=42,
+):
+    """Build one clipped spread and uncertainty table for selected contrasts.
+
+    Counts and medians are carried forward from ``contrasts``. Only clipped
+    quartiles, non-null counts, and optional bootstrap intervals are calculated
+    from the account-level data.
+    """
+    metrics = list(metrics)
+    segment_fields = list(segment_fields)
+    outcomes = tuple(outcomes)
+    if top_n < 1:
+        raise ValueError("top_n must be at least 1.")
+    if bootstrap_iterations < 0:
+        raise ValueError("bootstrap_iterations must be non-negative.")
+    if not 0 < confidence_level < 1:
+        raise ValueError("confidence_level must be between 0 and 1.")
+    if len(outcomes) != 2 or outcomes[0] == outcomes[1]:
+        raise ValueError("outcomes must contain two distinct values.")
+
+    outcome_tokens = tuple(_column_token(outcome) for outcome in outcomes)
+    if outcome_tokens[0] == outcome_tokens[1]:
+        raise ValueError("outcomes must resolve to distinct column labels.")
+    contrast_columns = ["segment_label", *segment_fields]
+    for token in outcome_tokens:
+        contrast_columns.append(f"n__{token}")
+        contrast_columns.extend(
+            f"median_{token}__{metric}" for metric in metrics
+        )
+    _require_columns(data, [id_col, outcome_col, *metrics, *segment_fields])
+    _require_columns(contrasts, contrast_columns)
+    _validate_unique_accounts(data, id_col)
+    _validate_behavior_reference(reference, metrics)
+    if contrasts.empty:
+        raise ValueError("No outcome contrasts are available for a detail table.")
+
+    selected = contrasts.head(top_n).reset_index(drop=True).copy()
+    selected.insert(0, "segment_rank", np.arange(1, len(selected) + 1))
+    rng = np.random.default_rng(random_state)
+    records = []
+
+    for _, selected_segment in selected.iterrows():
+        segment_data = _match_segment(data, selected_segment, segment_fields)
+        segment_data = segment_data[
+            segment_data[outcome_col].isin(outcomes)
+        ].copy()
+        clipped_values = _clip_metric_values(segment_data, metrics, reference)
+        base_record = {
+            "segment_rank": selected_segment["segment_rank"],
+            "segment_label": selected_segment["segment_label"],
+            **{field: selected_segment[field] for field in segment_fields},
+        }
+
+        outcome_masks = {
+            outcome: segment_data[outcome_col].eq(outcome).to_numpy()
+            for outcome in outcomes
+        }
+        for metric in metrics:
+            record = {**base_record, "metric": metric}
+            metric_arrays = {}
+            for outcome, token in zip(outcomes, outcome_tokens):
+                metric_values = clipped_values.loc[
+                    outcome_masks[outcome],
+                    metric,
+                ].dropna()
+                metric_arrays[outcome] = metric_values.to_numpy()
+                q25 = metric_values.quantile(0.25)
+                q75 = metric_values.quantile(0.75)
+                raw_median = selected_segment[f"median_{token}__{metric}"]
+                clipped_median = (
+                    float(
+                        np.clip(
+                            raw_median,
+                            reference["lower_bounds"][metric],
+                            reference["upper_bounds"][metric],
+                        )
+                    )
+                    if pd.notna(raw_median)
+                    else np.nan
+                )
+                record.update(
+                    {
+                        f"n__{token}": int(selected_segment[f"n__{token}"]),
+                        f"non_null__{token}": int(metric_values.size),
+                        f"clipped_median__{token}": clipped_median,
+                        f"clipped_q25__{token}": q25,
+                        f"clipped_q75__{token}": q75,
+                        f"clipped_iqr__{token}": q75 - q25,
+                    }
+                )
+
+            first_outcome, second_outcome = outcomes
+            first_token, second_token = outcome_tokens
+            ci_lower, ci_upper = _bootstrap_median_difference(
+                metric_arrays[first_outcome],
+                metric_arrays[second_outcome],
+                bootstrap_iterations,
+                confidence_level,
+                rng,
+            )
+            record.update(
+                clipped_median_difference=(
+                    record[f"clipped_median__{first_token}"]
+                    - record[f"clipped_median__{second_token}"]
+                ),
+                clipped_median_difference_ci_lower=ci_lower,
+                clipped_median_difference_ci_upper=ci_upper,
+                bootstrap_iterations=bootstrap_iterations,
+                confidence_level=confidence_level,
+            )
+            records.append(record)
+
+    result = pd.DataFrame.from_records(records)
+    result.attrs["selected_segments"] = selected
+    result.attrs["outcomes"] = outcomes
+    result.attrs["metrics"] = tuple(metrics)
+    return result
+
+
+def plot_selected_segment_clipped_boxplot_grid(
+    data,
+    contrasts,
+    metrics,
+    segment_fields,
+    reference,
+    outcome_col="status",
+    outcomes=("saved", "stoped"),
+    id_col="billing_account",
+    top_n=8,
+    palette=None,
+    show_points=False,
+    point_kwargs=None,
+    showfliers=True,
+    panel_size=(3.0, 2.6),
+    title=None,
+    show=False,
+    save=True,
+    chart_folder="charts",
+    file_name=None,
+    close=None,
+    save_kwargs=None,
+):
+    """Plot clipped business-unit values for the selected contrast rows."""
+    metrics = list(metrics)
+    segment_fields = list(segment_fields)
+    outcomes = tuple(outcomes)
+    if top_n < 1:
+        raise ValueError("top_n must be at least 1.")
+    if len(outcomes) != 2 or outcomes[0] == outcomes[1]:
+        raise ValueError("outcomes must contain two distinct values.")
+
+    outcome_tokens = tuple(_column_token(outcome) for outcome in outcomes)
+    if outcome_tokens[0] == outcome_tokens[1]:
+        raise ValueError("outcomes must resolve to distinct column labels.")
+    count_columns = [f"n__{token}" for token in outcome_tokens]
+    _require_columns(data, [id_col, outcome_col, *metrics, *segment_fields])
+    _require_columns(
+        contrasts,
+        ["segment_label", *segment_fields, *count_columns],
+    )
+    _validate_behavior_reference(reference, metrics)
+    _validate_unique_accounts(data, id_col)
+    if contrasts.empty:
+        raise ValueError("No outcome contrasts are available for a boxplot grid.")
+
+    selected = contrasts.head(top_n)
+    n_rows = len(selected)
+    n_cols = len(metrics)
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(panel_size[0] * n_cols, panel_size[1] * n_rows),
+        sharey="col",
+        squeeze=False,
+    )
+    resolved_palette = _resolve_outcome_palette(outcomes, palette)
+    point_defaults = {"alpha": 0.35, "size": 2.5, "jitter": 0.15}
+    point_defaults.update(point_kwargs or {})
+
+    for row_index, (_, selected_segment) in enumerate(selected.iterrows()):
+        segment_data = _match_segment(data, selected_segment, segment_fields)
+        segment_data = segment_data[
+            segment_data[outcome_col].isin(outcomes)
+        ].copy()
+        metric_values = _clip_metric_values(segment_data, metrics, reference)
+        counts = {
+            outcome: selected_segment[count_column]
+            for outcome, count_column in zip(outcomes, count_columns)
+        }
+
+        for column_index, metric in enumerate(metrics):
+            ax = axes[row_index, column_index]
+            plot_data = pd.DataFrame(
+                {
+                    outcome_col: segment_data[outcome_col].to_numpy(),
+                    "value": metric_values[metric].to_numpy(),
+                }
+            ).dropna(subset=["value"])
+            sns.boxplot(
+                data=plot_data,
+                x=outcome_col,
+                y="value",
+                order=outcomes,
+                hue=outcome_col,
+                hue_order=outcomes,
+                palette=resolved_palette,
+                showfliers=showfliers,
+                legend=False,
+                ax=ax,
+            )
+            if show_points:
+                sns.stripplot(
+                    data=plot_data,
+                    x=outcome_col,
+                    y="value",
+                    order=outcomes,
+                    hue=outcome_col,
+                    hue_order=outcomes,
+                    palette=resolved_palette,
+                    dodge=False,
+                    legend=False,
+                    ax=ax,
+                    **point_defaults,
+                )
+            ax.set_xticks(
+                range(len(outcomes)),
+                [
+                    f"{outcome}\nn={int(counts.get(outcome, 0)):,}"
+                    for outcome in outcomes
+                ],
+            )
+            ax.set_xlabel("")
+            if row_index == 0:
+                ax.set_title(metric)
+            if column_index == 0:
+                ax.set_ylabel("Value")
+                wrapped_label = textwrap.fill(
+                    str(selected_segment["segment_label"]),
+                    width=42,
+                )
+                ax.text(
+                    -0.58,
+                    0.5,
+                    wrapped_label,
+                    transform=ax.transAxes,
+                    ha="right",
+                    va="center",
+                    fontsize=8.5,
+                )
+            else:
+                ax.set_ylabel("")
+
+    resolved_title = title or "Raw clipped values for business magnitude"
+    resolved_file_name = file_name or "selected_segments_raw_clipped_v2.png"
+    fig.suptitle(resolved_title, fontsize=15, y=0.995)
+    saved_path = _finalize_figure(
+        fig,
+        show,
+        save,
+        chart_folder,
+        resolved_file_name,
+        close,
+        save_kwargs,
+        tight_layout_kwargs={"rect": (0.22, 0, 1, 0.98), "h_pad": 1.2},
+    )
+    visible_axes = list(axes.ravel())
+    for ax in visible_axes:
+        ax._saved_path = Path(saved_path) if saved_path is not None else None
+    return visible_axes
 
 
 def plot_top_behavior_contrasts(

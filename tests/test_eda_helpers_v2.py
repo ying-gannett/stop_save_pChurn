@@ -190,6 +190,91 @@ class BehaviorProfilingV2Tests(unittest.TestCase):
         self.assertEqual(len(axes), 2)
         self.assertEqual(axes[0].get_ylim(), axes[1].get_ylim())
 
+    def test_selected_detail_table_reuses_counts_and_adds_clipped_uncertainty(self):
+        contrasts = eda_helpers_v2.build_outcome_contrasts(
+            self.data,
+            metrics=self.metrics,
+            segment_fields=self.segment_fields,
+            outcome_col="outcome",
+            outcomes=("Saved", "Stopped"),
+            min_n=10,
+            reference=self.reference,
+        )
+        details = eda_helpers_v2.build_selected_segment_detail_table(
+            self.data,
+            contrasts,
+            metrics=self.metrics,
+            segment_fields=self.segment_fields,
+            reference=self.reference,
+            outcome_col="outcome",
+            outcomes=("Saved", "Stopped"),
+            top_n=2,
+            bootstrap_iterations=200,
+            random_state=7,
+        )
+
+        self.assertEqual(len(details.attrs["selected_segments"]), 2)
+        self.assertEqual(len(details), 10)
+        self.assertTrue(details["n__saved"].eq(10).all())
+        self.assertTrue(details["n__stopped"].eq(10).all())
+        self.assertTrue(details["non_null__saved"].eq(10).all())
+        self.assertTrue(details["non_null__stopped"].eq(10).all())
+        self.assertTrue(details["clipped_iqr__saved"].ge(0).all())
+        self.assertTrue(details["clipped_iqr__stopped"].ge(0).all())
+        first_detail = details.iloc[0]
+        first_contrast = contrasts.iloc[0]
+        expected_saved_median = np.clip(
+            first_contrast[f"median_saved__{first_detail['metric']}"],
+            self.reference["lower_bounds"][first_detail["metric"]],
+            self.reference["upper_bounds"][first_detail["metric"]],
+        )
+        self.assertEqual(
+            first_detail["clipped_median__saved"],
+            expected_saved_median,
+        )
+        self.assertTrue(
+            details["clipped_median_difference_ci_lower"].notna().all()
+        )
+        self.assertTrue(
+            details["clipped_median_difference_ci_lower"].le(
+                details["clipped_median_difference_ci_upper"]
+            ).all()
+        )
+
+    def test_selected_clipped_boxplot_grid_shares_axes_by_metric(self):
+        contrasts = eda_helpers_v2.build_outcome_contrasts(
+            self.data,
+            metrics=self.metrics,
+            segment_fields=self.segment_fields,
+            outcome_col="outcome",
+            outcomes=("Saved", "Stopped"),
+            min_n=10,
+            reference=self.reference,
+        )
+        clipped_axes = eda_helpers_v2.plot_selected_segment_clipped_boxplot_grid(
+            self.data,
+            contrasts,
+            metrics=self.metrics,
+            segment_fields=self.segment_fields,
+            reference=self.reference,
+            outcome_col="outcome",
+            outcomes=("Saved", "Stopped"),
+            top_n=2,
+            save=False,
+            show=False,
+            close=False,
+        )
+        metric_count = len(self.metrics)
+        self.assertEqual(len(clipped_axes), 2 * metric_count)
+        self.assertEqual(
+            clipped_axes[0].get_ylim(),
+            clipped_axes[metric_count].get_ylim(),
+        )
+        self.assertEqual(
+            [tick.get_text() for tick in clipped_axes[0].get_xticklabels()],
+            ["Saved\nn=10", "Stopped\nn=10"],
+        )
+
     def test_duplicate_accounts_are_rejected(self):
         duplicated = pd.concat([self.data, self.data.iloc[[0]]], ignore_index=True)
         with self.assertRaisesRegex(ValueError, "must be unique"):
