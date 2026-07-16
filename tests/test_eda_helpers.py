@@ -1,5 +1,4 @@
 import unittest
-import warnings
 
 import matplotlib
 
@@ -13,278 +12,285 @@ import pandas as pd
 from src import eda_helpers
 
 
-class MetricBoxplotViewsTests(unittest.TestCase):
-    fit_reference = staticmethod(eda_helpers.fit_behavior_reference)
-    prepare_boxplot_data = staticmethod(
-        getattr(eda_helpers, "_prepare_metric_boxplot_data")
-    )
-    resolve_palette = staticmethod(
-        getattr(eda_helpers, "_resolve_metric_group_palette")
-    )
-
+class EdaHelpersTests(unittest.TestCase):
     def setUp(self):
-        warnings.filterwarnings(
-            "ignore",
-            message="vert: bool was deprecated.*",
-            category=matplotlib.MatplotlibDeprecationWarning,
+        records = []
+        account_index = 0
+        segment_values = [
+            ("Called-In Cancel Flow", "Before", "Low"),
+            ("Called-In Cancel Flow", "After", "Low"),
+            ("Online Cancel Flow", "Before", "Medium"),
+            ("Online Cancel Flow", "After", np.nan),
+        ]
+        for segment_index, (channel, timing, risk) in enumerate(segment_values):
+            for outcome in eda_helpers.OUTCOMES:
+                for within_group in range(10):
+                    is_saved = outcome == eda_helpers.SAVED
+                    records.append(
+                        {
+                            "billing_account": f"acct_{account_index:03d}",
+                            "outcome": outcome,
+                            "contact_channel_group": channel,
+                            "contact_timing": timing,
+                            "cohort": "Three-Offer Cohort",
+                            "src_risk_tier": risk,
+                            "Treatment": ["Control", "Midpoint", "Tiered"][
+                                (within_group + int(is_saved)) % 3
+                            ],
+                            "frequency": (
+                                20 + segment_index * 3 + within_group + 10 * is_saved
+                            ),
+                            "breadth": 2 + segment_index + within_group / 5 + is_saved,
+                            "tenure": 900 + segment_index * 100 + within_group * 10,
+                            "tt_cost": (
+                                500 + segment_index * 20 + within_group - 50 * is_saved
+                            ),
+                            "constant_metric": 5.0,
+                        }
+                    )
+                    account_index += 1
+
+        self.data = pd.DataFrame.from_records(records)
+        self.metrics = [
+            "frequency",
+            "breadth",
+            "tenure",
+            "tt_cost",
+            "constant_metric",
+        ]
+        self.segment_fields = [
+            "contact_channel_group",
+            "contact_timing",
+            "cohort",
+            "src_risk_tier",
+        ]
+        self.reference = eda_helpers.fit_behavior_reference(
+            self.data,
+            self.metrics,
         )
-        self.data = pd.DataFrame(
-            {
-                "billing_account": [f"acct_{index:02d}" for index in range(12)],
-                "Treatment": ["Control", "Midpoint", "Tiered"] * 4,
-                "segment": ["A"] * 6 + ["B"] * 6,
-                "status": ["saved"] * 12,
-                "frequency": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 100],
-                "tenure": [
-                    100,
-                    200,
-                    300,
-                    400,
-                    500,
-                    600,
-                    700,
-                    800,
-                    900,
-                    1000,
-                    1100,
-                    10000,
-                ],
-                "constant_metric": [5.0] * 12,
-            }
+        self.profiles = eda_helpers.build_behavior_profiles(
+            self.data,
+            metrics=self.metrics,
+            segment_fields=["outcome", *self.segment_fields],
+            min_n=10,
+            reference=self.reference,
         )
-        self.metrics = ["frequency", "tenure", "constant_metric"]
+        self.contrasts = eda_helpers.build_outcome_contrasts(
+            self.profiles,
+            metrics=self.metrics,
+            segment_fields=self.segment_fields,
+        )
 
     def tearDown(self):
         plt.close("all")
 
-    def test_preparation_returns_raw_clipped_and_standardized_clipped_values(self):
-        reference = self.fit_reference(
-            self.data,
-            self.metrics,
-        )
-        segment_data = self.data[self.data["segment"].eq("A")]
-        prepared = self.prepare_boxplot_data(
-            segment_data,
-            self.metrics,
-            metric_reference=reference,
-        )
-        full_plot, clipped_plot, standardized_plot, _, _ = prepared
-
-        metric = "frequency"
-        raw_values = segment_data[metric]
-        expected_clipped = raw_values.clip(
-            reference["lower_bounds"][metric],
-            reference["upper_bounds"][metric],
-        )
-        expected_standardized = (
-            expected_clipped
-            .sub(reference["centers"][metric])
-            .div(reference["spreads"][metric])
-        )
-
-        actual_full = full_plot.loc[full_plot["metric"].eq(metric), "value"]
-        actual_clipped = clipped_plot.loc[
-            clipped_plot["metric"].eq(metric),
-            "value",
-        ]
-        actual_standardized = standardized_plot.loc[
-            standardized_plot["metric"].eq(metric),
-            "value",
-        ]
-        np.testing.assert_array_equal(actual_full, raw_values)
-        np.testing.assert_allclose(actual_clipped, expected_clipped)
-        np.testing.assert_allclose(actual_standardized, expected_standardized)
-
-    def test_zero_iqr_metric_preserves_raw_values_and_standardizes_to_zero(self):
-        reference = self.fit_reference(self.data, self.metrics)
-        self.assertEqual(reference["spreads"]["constant_metric"], 1.0)
-
-        prepared = self.prepare_boxplot_data(
-            self.data,
-            self.metrics,
-            metric_reference=reference,
-        )
-        full_plot, clipped_plot, standardized_plot, _, _ = prepared
-
-        def metric_values(plot_data):
-            return plot_data.loc[
-                plot_data["metric"].eq("constant_metric"),
-                "value",
-            ]
-
-        np.testing.assert_array_equal(metric_values(full_plot), 5.0)
-        np.testing.assert_array_equal(metric_values(clipped_plot), 5.0)
-        np.testing.assert_array_equal(metric_values(standardized_plot), 0.0)
-
-    def test_standalone_boxplot_function_renders_all_three_views(self):
-        axes = eda_helpers.plot_metric_boxplot_views(
-            self.data,
-            metrics=self.metrics,
-            group_col="Treatment",
-            group_order=["Control", "Midpoint", "Tiered"],
-            min_n=1,
-            show_points=False,
-            show=False,
-            save=False,
-            close=False,
-            boxplot_kwargs={"saturation": 1},
-        )
-
-        self.assertEqual(len(axes), 3)
-        self.assertIn("Original Values", axes[0].get_title())
-        self.assertIn("Clipped Values", axes[1].get_title())
-        self.assertIn("Standardized Clipped Values", axes[2].get_title())
-        self.assertEqual(axes[0].get_ylabel(), "Value")
-        self.assertEqual(axes[1].get_ylabel(), "Value")
-        self.assertEqual(
-            axes[2].get_ylabel(),
-            "Value relative to global median (IQR units)",
-        )
-        self.assertIsNone(axes[0].get_legend())
-        self.assertIsNone(axes[1].get_legend())
-        self.assertIsNotNone(axes[2].get_legend())
-        treatment_colors = ["#2E8B57", "#4C78A8", "#8E5EA2"]
-        legend_colors = [
-            handle.get_facecolor()
-            for handle in axes[2].get_legend().legend_handles
-        ]
-        for actual, expected in zip(legend_colors, treatment_colors):
-            np.testing.assert_allclose(actual, to_rgba(expected))
-
-    def test_semantic_status_colors_and_explicit_palette_override(self):
-        status_palette = self.resolve_palette(
-            "status",
-            ["Saved", "Stoped", "No Action yet"],
-        )
-        self.assertEqual(status_palette["Saved"], "#2E8B57")
-        self.assertEqual(status_palette["Stoped"], "#C44E52")
-        self.assertEqual(status_palette["No Action yet"], "#8C8C8C")
-
-        custom_palette = {
-            "Control": "black",
-            "Midpoint": "gray",
-            "Tiered": "white",
-        }
-        self.assertIs(
-            self.resolve_palette(
-                "Treatment",
-                ["Control", "Midpoint", "Tiered"],
-                palette=custom_palette,
-            ),
-            custom_palette,
-        )
-
-    def test_user_counts_are_unique_and_missing_segments_are_retained(self):
-        duplicated = pd.concat([self.data, self.data.iloc[[0]]], ignore_index=True)
-        duplicated.loc[len(duplicated)] = duplicated.iloc[1]
-        duplicated.loc[len(duplicated) - 1, "segment"] = np.nan
-
-        summary = eda_helpers.build_segment_summary(
-            duplicated,
-            "segment",
-            self.metrics,
-        )
-        segment_a_users = summary.loc[summary["segment"].eq("A"), "users"].item()
-        missing_segment_users = summary.loc[summary["segment"].isna(), "users"].item()
-        self.assertEqual(segment_a_users, 6)
-        self.assertEqual(missing_segment_users, 1)
-
-        prepared = self.prepare_boxplot_data(
-            duplicated,
-            self.metrics,
-            group_col="Treatment",
-            group_order=["Control", "Midpoint", "Tiered"],
-        )
-        group_counts = prepared[3]
-        self.assertEqual(group_counts["Control"], 4)
-
-    def test_outlier_percentage_uses_non_null_denominator(self):
-        summary = eda_helpers.build_outlier_summary(
+    def test_distribution_summary_includes_quality_percentiles_and_outliers(self):
+        summary = eda_helpers.build_distribution_summary(
             pd.DataFrame({"metric": [1.0, 1.0, 1.0, 100.0, np.nan]}),
             ["metric"],
         ).iloc[0]
 
         self.assertEqual(summary["row_count"], 5)
         self.assertEqual(summary["non_null_count"], 4)
+        self.assertEqual(summary["null_count"], 1)
+        self.assertEqual(summary["median"], summary["p50"])
+        self.assertEqual(summary["iqr"], summary["p75"] - summary["p25"])
         self.assertEqual(summary["outlier_count"], 1)
         self.assertEqual(summary["outlier_pct"], 25.0)
 
-    def test_segment_plotter_does_not_filter_status_values(self):
-        data = self.data.copy()
-        data.loc[0, "status"] = "No Action yet"
-        counts = eda_helpers.plot_slices_of_segments_boxplot(
-            data,
-            metrics=self.metrics,
-            slice_fields=["status"],
-            group_col=None,
-            show_points=False,
-            show=False,
-            save=False,
-            close=True,
-        )
-
-        self.assertIn("No Action yet", counts["status"].tolist())
-
-    def test_segment_outputs_share_separate_limits_across_pages(self):
-        paged_data = pd.concat(
-            [
-                self.data.assign(
-                    segment=f"segment_{index}",
-                    billing_account=[
-                        f"segment_{index}_{account}"
-                        for account in self.data["billing_account"]
-                    ],
-                )
-                for index in range(7)
-            ],
+    def test_segment_summary_counts_unique_accounts_and_retains_missing_values(self):
+        duplicated = pd.concat(
+            [self.data, self.data.iloc[[0]], self.data.iloc[[1]]],
             ignore_index=True,
         )
-        counts = eda_helpers.plot_slices_of_segments_boxplot(
-            paged_data,
+        duplicated.loc[len(duplicated) - 1, "src_risk_tier"] = np.nan
+        duplicated.loc[len(duplicated) - 1, "billing_account"] = "missing-risk"
+
+        summary = eda_helpers.build_segment_summary(
+            duplicated,
+            "src_risk_tier",
+            self.metrics,
+        )
+
+        low_users = summary.loc[
+            summary["src_risk_tier"].eq("Low"),
+            "users",
+        ].item()
+        missing_users = summary.loc[
+            summary["src_risk_tier"].isna(),
+            "users",
+        ].item()
+        self.assertEqual(low_users, 40)
+        self.assertEqual(missing_users, 21)
+
+    def test_common_reference_clips_and_robustly_scales_metrics(self):
+        transformed = eda_helpers.transform_behavior_metrics(
+            self.data,
+            self.metrics,
+            self.reference,
+        )
+
+        self.assertEqual(self.reference["spreads"]["constant_metric"], 1.0)
+        np.testing.assert_array_equal(transformed["constant_metric"], 0.0)
+        self.assertAlmostEqual(transformed["frequency"].median(), 0.0)
+        self.assertTrue(np.isfinite(transformed[self.metrics].to_numpy()).all())
+
+    def test_metric_boxplot_views_use_outcome_colors_and_three_value_scales(self):
+        axes = eda_helpers.plot_metric_boxplot_views(
+            self.data,
             metrics=self.metrics,
-            slice_fields=["segment"],
-            min_n=1,
+            group_col="outcome",
+            group_order=list(eda_helpers.OUTCOMES),
             show_points=False,
             show=False,
             save=False,
             close=False,
         )
 
-        self.assertEqual(counts["segment"].nunique(), 7)
-        figures = [plt.figure(number) for number in plt.get_fignums()]
-        self.assertEqual(len(figures), 6)
-        limits_by_plot_type = {
-            "full": [],
-            "clipped": [],
-            "standardized_clipped": [],
-        }
+        self.assertEqual(len(axes), 3)
+        self.assertIn("Original Values", axes[0].get_title())
+        self.assertIn("Clipped Values", axes[1].get_title())
+        self.assertIn("Standardized Clipped Values", axes[2].get_title())
+        legend_colors = [
+            handle.get_facecolor()
+            for handle in axes[2].get_legend().legend_handles
+        ]
+        for actual, expected in zip(
+            legend_colors,
+            [
+                eda_helpers.OUTCOME_COLORS[eda_helpers.SAVED],
+                eda_helpers.OUTCOME_COLORS[eda_helpers.STOPPED],
+            ],
+        ):
+            np.testing.assert_allclose(actual, to_rgba(expected))
 
-        for figure in figures:
-            figure_title = figure._suptitle.get_text()
-            visible_axes = [axis for axis in figure.axes if axis.get_visible()]
+    def test_outcome_contrasts_reuse_the_matched_profile_results(self):
+        self.assertEqual(len(self.profiles), 8)
+        self.assertEqual(len(self.contrasts), 4)
+        self.assertTrue(self.contrasts["n__saved"].eq(10).all())
+        self.assertTrue(self.contrasts["n__stopped"].eq(10).all())
+        self.assertTrue(self.contrasts["delta__frequency"].gt(0).all())
+        self.assertTrue(self.contrasts["delta__tt_cost"].lt(0).all())
+        self.assertTrue(self.contrasts["contrast_magnitude"].is_monotonic_decreasing)
 
-            if "Standardized clipped" in figure_title:
-                plot_type = "standardized_clipped"
-                expected_label = "Value relative to global median (IQR units)"
-            elif "Clipped values" in figure_title:
-                plot_type = "clipped"
-                expected_label = "Value"
-            else:
-                plot_type = "full"
-                expected_label = "Value"
-
-            for axis in visible_axes:
-                limits_by_plot_type[plot_type].append(axis.get_ylim())
-                self.assertEqual(axis.get_ylabel(), expected_label)
-
-        for plot_limits in limits_by_plot_type.values():
-            self.assertEqual(len(plot_limits), 7)
-            self.assertTrue(all(limit == plot_limits[0] for limit in plot_limits))
-
-        self.assertNotEqual(
-            limits_by_plot_type["clipped"][0],
-            limits_by_plot_type["standardized_clipped"][0],
+        first_contrast = self.contrasts.iloc[0]
+        saved_profile = self.profiles[self.profiles["outcome"].eq("Saved")]
+        for field in self.segment_fields:
+            value = first_contrast[field]
+            saved_profile = saved_profile[
+                saved_profile[field].isna()
+                if pd.isna(value)
+                else saved_profile[field].eq(value)
+            ]
+        self.assertEqual(
+            first_contrast["median_saved__frequency"],
+            saved_profile["median__frequency"].item(),
         )
+
+        with self.assertRaisesRegex(ValueError, "No Saved and Stopped"):
+            eda_helpers.build_outcome_contrasts(
+                self.profiles[self.profiles["outcome"].eq("Saved")],
+                metrics=self.metrics,
+                segment_fields=self.segment_fields,
+            )
+
+    def test_profile_contrast_heatmaps_and_standardized_drilldown_render(self):
+        profile_ax = eda_helpers.plot_behavior_profile_heatmap(
+            self.profiles,
+            metrics=self.metrics,
+            save=False,
+            show=False,
+            close=False,
+        )
+        contrast_ax = eda_helpers.plot_outcome_contrast_heatmap(
+            self.contrasts,
+            metrics=self.metrics,
+            save=False,
+            show=False,
+            close=False,
+        )
+        axes = eda_helpers.plot_top_behavior_contrasts(
+            self.data,
+            self.contrasts,
+            metrics=self.metrics,
+            segment_fields=self.segment_fields,
+            reference=self.reference,
+            top_n=2,
+            save=False,
+            show=False,
+            close=False,
+        )
+
+        self.assertIn("Behavior profiles", profile_ax.get_title())
+        self.assertIn("Saved minus Stopped", contrast_ax.get_title())
+        self.assertEqual(len(axes), 2)
+        self.assertEqual(axes[0].get_ylim(), axes[1].get_ylim())
+
+    def test_selected_segment_details_add_spread_and_bootstrap_uncertainty(self):
+        details = eda_helpers.build_selected_segment_detail_table(
+            self.data,
+            self.contrasts,
+            metrics=self.metrics,
+            segment_fields=self.segment_fields,
+            reference=self.reference,
+            top_n=2,
+            bootstrap_iterations=100,
+            random_state=7,
+        )
+        axes = eda_helpers.plot_selected_segment_clipped_boxplot_grid(
+            self.data,
+            self.contrasts,
+            metrics=self.metrics,
+            segment_fields=self.segment_fields,
+            reference=self.reference,
+            top_n=2,
+            save=False,
+            show=False,
+            close=False,
+        )
+
+        self.assertEqual(len(details), 2 * len(self.metrics))
+        self.assertTrue(details["n__saved"].eq(10).all())
+        self.assertTrue(details["n__stopped"].eq(10).all())
+        self.assertTrue(details["clipped_iqr__saved"].ge(0).all())
+        self.assertTrue(details["clipped_median_difference_ci_lower"].notna().all())
+        self.assertEqual(len(axes), 2 * len(self.metrics))
+        self.assertEqual(axes[0].get_ylim(), axes[len(self.metrics)].get_ylim())
+
+    def test_selected_segments_are_drilled_down_in_fixed_treatment_order(self):
+        treatment_contrasts = (
+            eda_helpers.build_selected_segment_treatment_contrasts(
+                self.data,
+                self.contrasts,
+                metrics=self.metrics,
+                segment_fields=self.segment_fields,
+                reference=self.reference,
+                top_n=2,
+                min_n=2,
+            )
+        )
+        treatment_ax = eda_helpers.plot_selected_segment_treatment_heatmap(
+            treatment_contrasts,
+            metrics=self.metrics,
+            save=False,
+            show=False,
+            close=False,
+        )
+
+        self.assertEqual(len(treatment_contrasts), 6)
+        self.assertEqual(
+            treatment_contrasts.groupby("segment_rank", sort=False)["Treatment"]
+            .apply(list)
+            .tolist(),
+            [
+                ["Control", "Midpoint", "Tiered"],
+                ["Control", "Midpoint", "Tiered"],
+            ],
+        )
+        self.assertTrue(treatment_contrasts["supported"].all())
+        self.assertTrue(treatment_contrasts["delta__frequency"].notna().all())
+        self.assertIn("Treatment drill-down", treatment_ax.get_title())
+
 
 if __name__ == "__main__":
     unittest.main()
