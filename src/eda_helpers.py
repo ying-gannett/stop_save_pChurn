@@ -987,9 +987,6 @@ def plot_metric_boxplot_views(
     return axes
 
 
-plot_full_and_clipped_boxplot = plot_metric_boxplot_views
-
-
 def _prepare_segment_boxplot_panels(
     data,
     metrics,
