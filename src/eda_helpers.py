@@ -1,8 +1,6 @@
-"""Reusable data summaries and chart builders for the project EDA."""
+"""Project-specific data summaries and chart builders for the EDA notebooks."""
 
-import re
 from pathlib import Path
-from typing import Any, Callable
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,28 +8,8 @@ import pandas as pd
 import seaborn as sns
 
 
-DEFAULT_PERCENTILES = (0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99)
-ORDERS = {
-    "src_risk_tier": [
-        "1. Low risk",
-        "2. Med-Low risk",
-        "3. Medium risk",
-        "4. Med-High risk",
-        "5. High risk",
-    ],
-    "cohort": ["Two-Offer Cohort", "Three-Offer Cohort"],
-    "Treatment": ["Control", "Midpoint", "Tiered"],
-    "contact_channel": [
-        "No Action yet",
-        "Called-In Cancel Flow",
-        "Online Cancel Flow",
-        "Called-In first",
-        "Online first",
-    ],
-    "status": ["No Action yet", "saved", "stoped"],
-    "contact_timing": ["Contact Before Pricing", "Contact On/After Pricing"],
-    "repeatedly_called": [0, 1],
-}
+_PERCENTILES = (0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99)
+_TREATMENT_ORDER = ["Control", "Midpoint", "Tiered"]
 SEMANTIC_GROUP_COLORS = {
     "treatment": {
         "control": "#2E8B57",
@@ -46,70 +24,13 @@ SEMANTIC_GROUP_COLORS = {
     },
 }
 
-# Chart output helpers
 
-
-def _slugify_file_name(value, max_length=120):
-    """Convert a title or file name to a filesystem-friendly stem."""
-    value = str(value).strip()
-    value = re.sub(r"[^\w\s.-]", "", value)
-    value = re.sub(r"[\s.-]+", "_", value)
-    value = value.strip("_")
-    return (value or "chart")[:max_length].rstrip("_")
-
-
-def _resolve_chart_path(folder, file_name, extension):
-    """Build the output path for a chart file."""
-    extension = extension.lstrip(".")
-    file_path = Path(file_name)
-    suffix = file_path.suffix or f".{extension}"
-    stem = _slugify_file_name(file_path.stem if file_path.suffix else file_path.name)
-    return Path(folder) / f"{stem}{suffix}"
-
-
-def _get_unique_path(path):
-    """Return a non-existing path by appending a numeric suffix when needed."""
-    if not path.exists():
-        return path
-
-    counter = 1
-    while True:
-        candidate = path.with_name(f"{path.stem}_{counter}{path.suffix}")
-        if not candidate.exists():
-            return candidate
-        counter += 1
-
-
-def save_chart(
-    chart=None,
-    folder="charts",
-    file_name=None,
-    chart_title=None,
-    extension="png",
-    dpi=300,
-    bbox_inches="tight",
-    overwrite=True,
-    **savefig_kwargs,
-):
-    """Save a matplotlib figure using an explicit file name or chart title."""
-    if chart is None:
-        fig = plt.gcf()
-    elif hasattr(chart, "savefig"):
-        fig = chart
-    elif hasattr(chart, "figure"):
-        fig = chart.figure
-    else:
-        raise ValueError("chart must be a matplotlib Figure, Axes, or None.")
-
+def save_chart(fig, folder, file_name):
+    """Save a matplotlib figure to the requested project output path."""
     output_folder = Path(folder)
     output_folder.mkdir(parents=True, exist_ok=True)
-
-    resolved_title = file_name or chart_title or "chart"
-    output_path = _resolve_chart_path(output_folder, resolved_title, extension)
-    if not overwrite:
-        output_path = _get_unique_path(output_path)
-
-    fig.savefig(output_path, dpi=dpi, bbox_inches=bbox_inches, **savefig_kwargs)
+    output_path = output_folder / file_name
+    fig.savefig(output_path, dpi=300, bbox_inches="tight")
     return output_path
 
 
@@ -119,9 +40,7 @@ def _finalize_chart(
     save=True,
     chart_folder="charts",
     file_name=None,
-    chart_title=None,
     close=None,
-    save_kwargs=None,
 ):
     """Apply layout, optionally save/show a chart, and close it when appropriate."""
     fig.tight_layout()
@@ -132,8 +51,6 @@ def _finalize_chart(
             fig,
             folder=chart_folder,
             file_name=file_name,
-            chart_title=chart_title,
-            **(save_kwargs or {}),
         )
 
     if show:
@@ -146,26 +63,6 @@ def _finalize_chart(
     return saved_path
 
 
-def _format_file_name_template(file_name, **values):
-    """Render a file name template with known values when placeholders are present."""
-    if file_name is None:
-        return None
-
-    try:
-        return str(file_name).format(**values)
-    except (KeyError, IndexError):
-        return file_name
-
-
-def _append_file_name_suffix(file_name, suffix):
-    """Append a slugified suffix to a file name before its extension."""
-    path = Path(file_name)
-    suffix = _slugify_file_name(suffix)
-    if path.suffix:
-        return f"{path.stem}_{suffix}{path.suffix}"
-    return f"{path.name}_{suffix}"
-
-
 def cast_numeric_fields(data, numeric_fields):
     """Cast selected columns to float64 in place and return the dataframe."""
     for field in numeric_fields:
@@ -173,7 +70,7 @@ def cast_numeric_fields(data, numeric_fields):
     return data
 
 
-def build_distribution_summary(data, numeric_fields, percentiles=DEFAULT_PERCENTILES):
+def build_distribution_summary(data, numeric_fields):
     """Summarize quality checks, standard deviation, and percentiles for numeric fields."""
     quality_checks = []
     for field in numeric_fields:
@@ -192,8 +89,8 @@ def build_distribution_summary(data, numeric_fields, percentiles=DEFAULT_PERCENT
 
     quality_summary = pd.DataFrame(quality_checks).set_index("field")
     summary_stats = data[numeric_fields].agg(["std"]).T
-    percentile_summary = data[numeric_fields].quantile(percentiles).T
-    percentile_summary.columns = [f"p{int(p * 100):02d}" for p in percentiles]
+    percentile_summary = data[numeric_fields].quantile(_PERCENTILES).T
+    percentile_summary.columns = [f"p{int(p * 100):02d}" for p in _PERCENTILES]
 
     return quality_summary.join(summary_stats).join(percentile_summary).reset_index()
 
@@ -234,11 +131,9 @@ def build_outlier_summary(data, numeric_fields):
     return pd.DataFrame(outlier_summary)
 
 
-def build_segment_summary(data, segment, metrics, id_col="billing_account"):
+def build_segment_summary(data, segment, metrics):
     """Aggregate user counts and numeric metric summaries by one segment."""
-    agg_spec: dict[str, tuple[str, str | Callable[[Any], Any]]] = {
-        "users": (id_col, "nunique")
-    }
+    agg_spec = {"users": ("billing_account", "nunique")}
     for metric in metrics:
         agg_spec[f"avg_{metric}"] = (metric, "mean")
         agg_spec[f"median_{metric}"] = (metric, "median")
@@ -252,260 +147,14 @@ def build_segment_summary(data, segment, metrics, id_col="billing_account"):
     )
 
 
-def _get_group_counts(data, group_col, id_col="billing_account", dropna=True):
-    """Count unique accounts per group for plotting filters and labels."""
-    return data.groupby(group_col, dropna=dropna)[id_col].nunique()
-
-
-def _resolve_group_order(counts, order=None, min_n=1):
-    """Resolve group display order after applying a minimum sample-size threshold."""
-    valid_groups = counts[counts >= min_n].index.tolist()
-
-    if order is None:
-        return counts[counts >= min_n].sort_values(ascending=False).index.tolist()
-
-    resolved_order = [group for group in order if group in valid_groups]
-    resolved_order += [group for group in valid_groups if group not in resolved_order]
-    return resolved_order
-
-
-def plot_histogram_with_log(
-    data,
-    metric,
-    group,
-    bins=50,
-    figsize=(10, 5),
-    show=False,
-    save=True,
-    chart_folder="charts",
-    file_name=None,
-    chart_title=None,
-    close=None,
-    save_kwargs=None,
-):
-    """Plot raw and log1p histograms for one numeric metric."""
-    values = data[metric].dropna()
-    non_negative_values = values[values >= 0]
-
-    fig, axes = plt.subplots(1, 2, figsize=figsize)
-
-    sns.histplot(values, bins=bins, kde=True, ax=axes[0])
-    axes[0].set_title(f"Distribution of {metric} | {group} users")
-    axes[0].set_xlabel(metric)
-    axes[0].set_ylabel("Count")
-
-    sns.histplot(np.log1p(non_negative_values), bins=bins, kde=True, ax=axes[1])
-    axes[1].set_title(f"Log-Scale Distribution of {metric} | {group} users")
-    axes[1].set_xlabel(f"log1p({metric})")
-    axes[1].set_ylabel("Count")
-
-    _finalize_chart(
-        fig,
-        show=show,
-        save=save,
-        chart_folder=chart_folder,
-        file_name=file_name,
-        chart_title=chart_title or f"{metric} distribution | {group} users",
-        close=close,
-        save_kwargs=save_kwargs,
-    )
-    return axes
-
-
-def plot_correlation_heatmap(
-    data,
-    numeric_fields,
-    group=None,
-    figsize=(7, 5),
-    annot=True,
-    cmap="coolwarm",
-    center=0,
-    fmt=".2f",
-    show=False,
-    save=True,
-    chart_folder="charts",
-    file_name=None,
-    chart_title=None,
-    close=None,
-    save_kwargs=None,
-    **heatmap_kwargs,
-):
-    """Plot a correlation heatmap for available numeric fields."""
-    fields = [field for field in numeric_fields if field in data.columns]
-    if not fields:
-        return None
-
-    title = chart_title or (
-        f"Correlation Matrix | {group} users" if group is not None else "Correlation Matrix"
-    )
-
-    fig, ax = plt.subplots(figsize=figsize)
-    sns.heatmap(
-        data[fields].corr(),
-        annot=annot,
-        cmap=cmap,
-        center=center,
-        fmt=fmt,
-        ax=ax,
-        **heatmap_kwargs,
-    )
-    ax.set_title(title)
-
-    _finalize_chart(
-        fig,
-        show=show,
-        save=save,
-        chart_folder=chart_folder,
-        file_name=file_name,
-        chart_title=title,
-        close=close,
-        save_kwargs=save_kwargs,
-    )
-    return ax
-
-
-def plot_scatter_pairs(
-    data,
-    pairs,
-    sample_size=10000,
-    random_state=42,
-    figsize=(8, 5),
-    show=False,
-    save=True,
-    chart_folder="charts",
-    file_name=None,
-    chart_title=None,
-    close=None,
-    save_kwargs=None,
-):
-    """Plot and save scatter charts for selected numeric column pairs."""
-    if data.empty:
-        return []
-
-    sample_df = data.sample(min(sample_size, len(data)), random_state=random_state)
-    pairs = list(pairs)
-    saved_paths = []
-    plotted_count = 0
-
-    for x_col, y_col in pairs:
-        if x_col in sample_df.columns and y_col in sample_df.columns:
-            plotted_count += 1
-            title = _format_file_name_template(
-                chart_title,
-                x_col=x_col,
-                y_col=y_col,
-                pair=f"{y_col}_vs_{x_col}",
-                index=plotted_count,
-            ) or f"{y_col} vs {x_col}"
-            fig, ax = plt.subplots(figsize=figsize)
-            sns.scatterplot(data=sample_df, x=x_col, y=y_col, alpha=0.3, ax=ax)
-            ax.set_title(title)
-            ax.set_xlabel(x_col)
-            ax.set_ylabel(y_col)
-
-            resolved_file_name = _format_file_name_template(
-                file_name,
-                x_col=x_col,
-                y_col=y_col,
-                pair=f"{y_col}_vs_{x_col}",
-                index=plotted_count,
-            )
-            if file_name is not None and resolved_file_name == file_name and len(pairs) > 1:
-                resolved_file_name = _append_file_name_suffix(
-                    file_name,
-                    f"{y_col}_vs_{x_col}",
-                )
-            elif file_name is None and chart_title is not None and len(pairs) > 1:
-                resolved_file_name = _append_file_name_suffix(
-                    title,
-                    f"{y_col}_vs_{x_col}",
-                )
-
-            saved_path = _finalize_chart(
-                fig,
-                show=show,
-                save=save,
-                chart_folder=chart_folder,
-                file_name=resolved_file_name,
-                chart_title=title,
-                close=close,
-                save_kwargs=save_kwargs,
-            )
-            if saved_path is not None:
-                saved_paths.append(saved_path)
-
-    return saved_paths
-
-
-def plot_bucket_counts(
-    data,
-    bucket_col,
-    dropna=False,
-    figsize=(9, 5),
-    show=False,
-    save=True,
-    chart_folder="charts",
-    file_name=None,
-    chart_title=None,
-    close=None,
-    save_kwargs=None,
-):
-    """Plot frequency counts for a categorical or bucketed column."""
-    bucket_counts = data[bucket_col].value_counts(dropna=dropna).reset_index()
-    bucket_counts.columns = [bucket_col, "count"]
-
-    fig, ax = plt.subplots(figsize=figsize)
-    ax = sns.barplot(data=bucket_counts, x=bucket_col, y="count", ax=ax)
-    title = chart_title or f"Distribution by {bucket_col}"
-    ax.set_title(title)
-    ax.set_xlabel(bucket_col)
-    ax.set_ylabel("Count")
-    plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
-
-    saved_path = _finalize_chart(
-        fig,
-        show=show,
-        save=save,
-        chart_folder=chart_folder,
-        file_name=file_name,
-        chart_title=title,
-        close=close,
-        save_kwargs=save_kwargs,
-    )
-    if saved_path is not None:
-        bucket_counts.attrs["saved_path"] = str(saved_path)
-
-    return bucket_counts
-
-
-def _apply_segment_filters(data, filters):
-    """Filter a dataframe to rows matching a segment-combination dictionary."""
-    filtered = data
-
-    for col, value in filters.items():
-        if pd.isna(value):
-            filtered = filtered[filtered[col].isna()]
-        else:
-            filtered = filtered[filtered[col].eq(value)]
-
-    return filtered
-
-
 def _fit_global_metric_reference(
     data,
     metrics,
-    lower_q=0.01,
-    upper_q=0.99,
 ):
-    """Fit global clipping bounds and robust scaling parameters per metric."""
-    if not 0 <= lower_q < upper_q <= 1:
-        raise ValueError(
-            "lower_q and upper_q must satisfy 0 <= lower_q < upper_q <= 1."
-        )
-
-    metric_values = data[list(metrics)]
-    lower_bounds = metric_values.quantile(lower_q)
-    upper_bounds = metric_values.quantile(upper_q)
+    """Fit 1%-99% clipping bounds and robust scaling parameters per metric."""
+    metric_values = data[metrics]
+    lower_bounds = metric_values.quantile(0.01)
+    upper_bounds = metric_values.quantile(0.99)
     centers = metric_values.median()
     spreads = metric_values.quantile(0.75) - metric_values.quantile(0.25)
 
@@ -528,39 +177,38 @@ def _prepare_metric_boxplot_data(
     metrics,
     group_col=None,
     group_order=None,
-    lower_q=0.01,
-    upper_q=0.99,
-    id_col="billing_account",
     min_n=1,
     metric_reference=None,
 ):
     """Prepare full, clipped, and standardized-clipped boxplot data."""
-    metrics = list(metrics)
     plot_source = data.copy()
     group_counts = pd.Series(dtype="int64")
     resolved_group_order = []
 
     if group_col is not None:
         plot_source = plot_source.dropna(subset=[group_col])
-        group_counts = _get_group_counts(plot_source, group_col, id_col=id_col)
-
-        resolved_group_order = _resolve_group_order(
-            group_counts,
-            order=group_order,
-            min_n=min_n,
-        )
+        group_counts = plot_source.groupby(group_col)["billing_account"].nunique()
+        valid_groups = group_counts[group_counts >= min_n].index.tolist()
+        if group_order is None:
+            resolved_group_order = (
+                group_counts[group_counts >= min_n]
+                .sort_values(ascending=False)
+                .index.tolist()
+            )
+        else:
+            resolved_group_order = [
+                group for group in group_order if group in valid_groups
+            ]
+            resolved_group_order += [
+                group for group in valid_groups if group not in resolved_group_order
+            ]
         plot_source = plot_source[plot_source[group_col].isin(resolved_group_order)]
         if plot_source.empty or not resolved_group_order:
             return None
 
     full_values = plot_source[metrics].astype("float64")
     if metric_reference is None:
-        metric_reference = _fit_global_metric_reference(
-            full_values,
-            metrics,
-            lower_q=lower_q,
-            upper_q=upper_q,
-        )
+        metric_reference = _fit_global_metric_reference(full_values, metrics)
 
     lower_bounds = metric_reference["lower_bounds"]
     upper_bounds = metric_reference["upper_bounds"]
@@ -723,35 +371,6 @@ def _plot_metric_boxplot_axis(
     return ax
 
 
-def _format_grouped_boxplot_legend(
-    axes,
-    group_col,
-    group_counts,
-    group_order,
-    show_counts=True,
-):
-    """Keep one grouped boxplot legend and optionally append group counts."""
-    if group_col is None:
-        return
-
-    for ax in axes[:-1]:
-        legend = ax.get_legend()
-        if legend is not None:
-            legend.remove()
-
-    final_legend = axes[-1].get_legend()
-    if final_legend is None:
-        return
-
-    _format_metric_boxplot_legend(
-        final_legend,
-        group_col,
-        group_counts,
-        group_order,
-        show_counts=show_counts,
-    )
-
-
 def _format_metric_boxplot_legend(
     legend,
     group_col,
@@ -773,13 +392,6 @@ def _format_metric_boxplot_legend(
     }
     for text in legend.get_texts():
         text.set_text(label_map.get(text.get_text(), text.get_text()))
-
-
-def _resolve_paginated_file_name(file_name, page_number, total_pages):
-    """Append a page number to a file name when multiple pages are saved."""
-    if total_pages <= 1:
-        return file_name
-    return _append_file_name_suffix(file_name, str(page_number))
 
 
 def _get_metric_boxplot_value_limits(panels, plot_key, padding_fraction=0.05):
@@ -815,7 +427,6 @@ def _plot_metric_boxplot_panels(
     chart_folder="charts",
     file_name=None,
     close=None,
-    save_kwargs=None,
     showfliers=True,
     palette=None,
     show_counts=True,
@@ -876,20 +487,15 @@ def _plot_metric_boxplot_panels(
         save=save,
         chart_folder=chart_folder,
         file_name=file_name,
-        chart_title=figure_title,
         close=close,
-        save_kwargs=save_kwargs,
     )
 
 
 def plot_metric_boxplot_views(
     data,
     metrics,
-    dataset_name=None,
     group_col=None,
     group_order=None,
-    lower_q=0.01,
-    upper_q=0.99,
     figsize=(15, 4),
     show=False,
     save=True,
@@ -897,10 +503,8 @@ def plot_metric_boxplot_views(
     file_name=None,
     chart_title=None,
     close=None,
-    save_kwargs=None,
     showfliers=True,
     palette=None,
-    id_col="billing_account",
     min_n=1,
     show_counts=True,
     show_points=True,
@@ -914,9 +518,6 @@ def plot_metric_boxplot_views(
         metrics=metrics,
         group_col=group_col,
         group_order=group_order,
-        lower_q=lower_q,
-        upper_q=upper_q,
-        id_col=id_col,
         min_n=min_n,
     )
     if prepared is None:
@@ -929,10 +530,8 @@ def plot_metric_boxplot_views(
         group_counts,
         resolved_group_order,
     ) = prepared
-    dataset_label = f" | {dataset_name} users" if dataset_name is not None else ""
-    clip_label = f"{lower_q:.0%}-{upper_q:.0%}"
     group_title = f" by {group_col}" if group_col is not None else ""
-    title = chart_title or f"Metric boxplots{group_title}{dataset_label}"
+    title = chart_title or f"Metric boxplots{group_title}"
 
     fig, axes = plt.subplots(1, 3, figsize=figsize)
     common_plot_kwargs = {
@@ -948,31 +547,36 @@ def plot_metric_boxplot_views(
     _plot_metric_boxplot_axis(
         axes[0],
         full_plot,
-        f"Original Values{dataset_label}",
+        "Original Values",
         **common_plot_kwargs,
     )
     _plot_metric_boxplot_axis(
         axes[1],
         clipped_plot,
-        f"Clipped Values ({clip_label}){dataset_label}",
+        "Clipped Values (1%-99%)",
         **common_plot_kwargs,
     )
     _plot_metric_boxplot_axis(
         axes[2],
         standardized_clipped_plot,
-        f"Standardized Clipped Values ({clip_label}){dataset_label}",
+        "Standardized Clipped Values (1%-99%)",
         value_label="Value relative to global median (IQR units)",
         **common_plot_kwargs,
     )
     fig.suptitle(title)
 
-    _format_grouped_boxplot_legend(
-        axes,
-        group_col,
-        group_counts,
-        resolved_group_order,
-        show_counts=show_counts,
-    )
+    if group_col is not None:
+        for ax in axes[:-1]:
+            legend = ax.get_legend()
+            if legend is not None:
+                legend.remove()
+        _format_metric_boxplot_legend(
+            axes[-1].get_legend(),
+            group_col,
+            group_counts,
+            resolved_group_order,
+            show_counts=show_counts,
+        )
 
     _finalize_chart(
         fig,
@@ -980,9 +584,7 @@ def plot_metric_boxplot_views(
         save=save,
         chart_folder=chart_folder,
         file_name=file_name,
-        chart_title=title,
         close=close,
-        save_kwargs=save_kwargs,
     )
     return axes
 
@@ -993,36 +595,30 @@ def _prepare_segment_boxplot_panels(
     slice_fields,
     group_col,
     group_order,
-    id_col,
     min_n,
-    lower_q,
-    upper_q,
 ):
     """Prepare counts and plot-ready data for every segment combination."""
-    metric_reference = _fit_global_metric_reference(
-        data,
-        metrics,
-        lower_q=lower_q,
-        upper_q=upper_q,
-    )
+    metric_reference = _fit_global_metric_reference(data, metrics)
     groupby_fields = [*slice_fields]
     if group_col is not None:
         groupby_fields.append(group_col)
 
     segment_combo_counts = (
         data.groupby(groupby_fields, dropna=False)
-        .agg(users=(id_col, "nunique"))
+        .agg(users=("billing_account", "nunique"))
         .reset_index()
     )
     plot_combinations = segment_combo_counts[slice_fields].drop_duplicates()
 
     panels = []
-    for combo_index, row in enumerate(
-        plot_combinations.itertuples(index=False),
-        start=1,
-    ):
+    for row in plot_combinations.itertuples(index=False):
         filters = row._asdict()
-        plot_data = _apply_segment_filters(data, filters)
+        plot_data = data
+        for column, value in filters.items():
+            if pd.isna(value):
+                plot_data = plot_data[plot_data[column].isna()]
+            else:
+                plot_data = plot_data[plot_data[column].eq(value)]
         title = ", ".join(
             f"{column}=Missing" if pd.isna(value) else str(value)
             for column, value in filters.items()
@@ -1032,9 +628,6 @@ def _prepare_segment_boxplot_panels(
             metrics=metrics,
             group_col=group_col,
             group_order=group_order,
-            lower_q=lower_q,
-            upper_q=upper_q,
-            id_col=id_col,
             min_n=min_n,
             metric_reference=metric_reference,
         )
@@ -1056,8 +649,6 @@ def _prepare_segment_boxplot_panels(
                 "standardized_clipped_plot": standardized_clipped_plot,
                 "group_counts": group_counts,
                 "group_order": resolved_group_order,
-                "combo_index": combo_index,
-                "filters": filters,
             }
         )
 
@@ -1067,21 +658,19 @@ def _prepare_segment_boxplot_panels(
 def _render_segment_boxplot_pages(
     panels,
     plot_specs,
-    slices_per_file,
-    n_cols,
     panel_size,
     chart_folder,
     show,
     save,
     close,
-    save_kwargs,
     plot_kwargs,
 ):
     """Render every metric view with stable y-limits across all pages."""
-    saved_paths = {spec["name"]: [] for spec in plot_specs}
     if not panels:
-        return saved_paths
+        return
 
+    slices_per_file = 6
+    n_cols = 2
     total_pages = (len(panels) + slices_per_file - 1) // slices_per_file
     y_limits_by_plot = {
         spec["plot_key"]: _get_metric_boxplot_value_limits(
@@ -1099,7 +688,11 @@ def _render_segment_boxplot_pages(
         page_label = f" page {page_number}/{total_pages}" if total_pages > 1 else ""
 
         for spec in plot_specs:
-            saved_path = _plot_metric_boxplot_panels(
+            file_path = Path(spec["file_name"])
+            page_file_name = spec["file_name"]
+            if total_pages > 1:
+                page_file_name = f"{file_path.stem}_{page_number}{file_path.suffix}"
+            _plot_metric_boxplot_panels(
                 panels=page_panels,
                 plot_key=spec["plot_key"],
                 figure_title=f"{spec['title']}{page_label}",
@@ -1108,21 +701,12 @@ def _render_segment_boxplot_pages(
                 show=show,
                 save=save,
                 chart_folder=chart_folder,
-                file_name=_resolve_paginated_file_name(
-                    spec["file_name"],
-                    page_number,
-                    total_pages,
-                ),
+                file_name=page_file_name,
                 close=close,
-                save_kwargs=save_kwargs,
                 y_limits=y_limits_by_plot[spec["plot_key"]],
                 value_label=spec["value_label"],
                 **plot_kwargs,
             )
-            if saved_path is not None:
-                saved_paths[spec["name"]].append(str(saved_path))
-
-    return saved_paths
 
 
 def plot_slices_of_segments_boxplot(
@@ -1130,20 +714,14 @@ def plot_slices_of_segments_boxplot(
     metrics,
     slice_fields,
     group_col="Treatment",
-    id_col="billing_account",
     min_n=5,
     group_order=None,
-    lower_q=0.01,
-    upper_q=0.99,
     show=False,
     save=True,
     chart_folder="charts",
     close=None,
-    save_kwargs=None,
     full_file_name="segment_slices_full.png",
     clipped_file_name="segment_slices_clipped.png",
-    slices_per_file=6,
-    n_cols=2,
     panel_size=(7, 4),
     showfliers=True,
     palette=None,
@@ -1155,16 +733,8 @@ def plot_slices_of_segments_boxplot(
     standardized_clipped_file_name="segment_slices_standardized_clipped.png",
 ):
     """Plot three paginated metric views for already-filtered segment data."""
-    if slices_per_file < 1:
-        raise ValueError("slices_per_file must be at least 1.")
-
-    metrics = list(metrics)
-    slice_fields = list(slice_fields)
-    if not slice_fields:
-        raise ValueError("slice_fields must contain at least one column.")
-
     if group_order is None and group_col == "Treatment":
-        group_order = ORDERS["Treatment"]
+        group_order = _TREATMENT_ORDER
 
     segment_combo_counts, panels = _prepare_segment_boxplot_panels(
         data=data,
@@ -1172,54 +742,44 @@ def plot_slices_of_segments_boxplot(
         slice_fields=slice_fields,
         group_col=group_col,
         group_order=group_order,
-        id_col=id_col,
         min_n=min_n,
-        lower_q=lower_q,
-        upper_q=upper_q,
     )
-    clip_label = f"{lower_q:.0%}-{upper_q:.0%}"
     group_title = f" by {group_col}" if group_col is not None else ""
 
     plot_specs = [
         {
-            "name": "full",
             "plot_key": "full_plot",
             "file_name": full_file_name,
             "title": f"Segment slice metric boxplots{group_title} | Full values",
             "value_label": "Value",
         },
         {
-            "name": "clipped",
             "plot_key": "clipped_plot",
             "file_name": clipped_file_name,
             "title": (
                 f"Segment slice metric boxplots{group_title} | "
-                f"Clipped values ({clip_label})"
+                "Clipped values (1%-99%)"
             ),
             "value_label": "Value",
         },
         {
-            "name": "standardized_clipped",
             "plot_key": "standardized_clipped_plot",
             "file_name": standardized_clipped_file_name,
             "title": (
                 f"Segment slice metric boxplots{group_title} | "
-                f"Standardized clipped values ({clip_label})"
+                "Standardized clipped values (1%-99%)"
             ),
             "value_label": "Value relative to global median (IQR units)",
         },
     ]
-    saved_paths = _render_segment_boxplot_pages(
+    _render_segment_boxplot_pages(
         panels=panels,
         plot_specs=plot_specs,
-        slices_per_file=slices_per_file,
-        n_cols=n_cols,
         panel_size=panel_size,
         chart_folder=chart_folder,
         show=show,
         save=save,
         close=close,
-        save_kwargs=save_kwargs,
         plot_kwargs={
             "group_col": group_col,
             "showfliers": showfliers,
@@ -1232,5 +792,4 @@ def plot_slices_of_segments_boxplot(
         },
     )
 
-    segment_combo_counts.attrs["saved_paths"] = saved_paths
     return segment_combo_counts

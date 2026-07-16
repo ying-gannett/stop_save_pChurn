@@ -63,15 +63,11 @@ class MetricBoxplotViewsTests(unittest.TestCase):
         reference = self.fit_reference(
             self.data,
             self.metrics,
-            lower_q=0.1,
-            upper_q=0.9,
         )
         segment_data = self.data[self.data["segment"].eq("A")]
         prepared = self.prepare_boxplot_data(
             segment_data,
             self.metrics,
-            lower_q=0.1,
-            upper_q=0.9,
             metric_reference=reference,
         )
         full_plot, clipped_plot, standardized_plot, _, _ = prepared
@@ -232,23 +228,31 @@ class MetricBoxplotViewsTests(unittest.TestCase):
         self.assertIn("No Action yet", counts["status"].tolist())
 
     def test_segment_outputs_share_separate_limits_across_pages(self):
+        paged_data = pd.concat(
+            [
+                self.data.assign(
+                    segment=f"segment_{index}",
+                    billing_account=[
+                        f"segment_{index}_{account}"
+                        for account in self.data["billing_account"]
+                    ],
+                )
+                for index in range(7)
+            ],
+            ignore_index=True,
+        )
         counts = eda_helpers.plot_slices_of_segments_boxplot(
-            self.data,
+            paged_data,
             metrics=self.metrics,
             slice_fields=["segment"],
             min_n=1,
-            slices_per_file=1,
-            n_cols=2,
             show_points=False,
             show=False,
             save=False,
             close=False,
         )
 
-        self.assertEqual(
-            set(counts.attrs["saved_paths"]),
-            {"full", "clipped", "standardized_clipped"},
-        )
+        self.assertEqual(counts["segment"].nunique(), 7)
         figures = [plt.figure(number) for number in plt.get_fignums()]
         self.assertEqual(len(figures), 6)
         limits_by_plot_type = {
@@ -260,8 +264,6 @@ class MetricBoxplotViewsTests(unittest.TestCase):
         for figure in figures:
             figure_title = figure._suptitle.get_text()
             visible_axes = [axis for axis in figure.axes if axis.get_visible()]
-            self.assertEqual(len(visible_axes), 1)
-            axis = visible_axes[0]
 
             if "Standardized clipped" in figure_title:
                 plot_type = "standardized_clipped"
@@ -273,35 +275,18 @@ class MetricBoxplotViewsTests(unittest.TestCase):
                 plot_type = "full"
                 expected_label = "Value"
 
-            limits_by_plot_type[plot_type].append(axis.get_ylim())
-            self.assertEqual(axis.get_ylabel(), expected_label)
+            for axis in visible_axes:
+                limits_by_plot_type[plot_type].append(axis.get_ylim())
+                self.assertEqual(axis.get_ylabel(), expected_label)
 
         for plot_limits in limits_by_plot_type.values():
-            self.assertEqual(len(plot_limits), 2)
-            self.assertEqual(plot_limits[0], plot_limits[1])
+            self.assertEqual(len(plot_limits), 7)
+            self.assertTrue(all(limit == plot_limits[0] for limit in plot_limits))
 
         self.assertNotEqual(
             limits_by_plot_type["clipped"][0],
             limits_by_plot_type["standardized_clipped"][0],
         )
-
-    def test_invalid_quantile_order_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, "lower_q and upper_q"):
-            eda_helpers.plot_slices_of_segments_boxplot(
-                self.data,
-                metrics=self.metrics,
-                slice_fields=["segment"],
-                lower_q=0.9,
-                upper_q=0.1,
-                save=False,
-            )
-
-    def test_legacy_boxplot_name_remains_an_alias(self):
-        self.assertIs(
-            eda_helpers.plot_full_and_clipped_boxplot,
-            eda_helpers.plot_metric_boxplot_views,
-        )
-
 
 if __name__ == "__main__":
     unittest.main()
