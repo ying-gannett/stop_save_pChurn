@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from src import eda_helpers_v2
+from src import eda_helpers as eda_helpers_v2
 
 
 class BehaviorProfilingV2Tests(unittest.TestCase):
@@ -33,6 +33,9 @@ class BehaviorProfilingV2Tests(unittest.TestCase):
                             "contact_timing": timing,
                             "cohort": "Three-Offer Cohort",
                             "src_risk_tier": risk,
+                            "Treatment": ["Control", "Midpoint", "Tiered"][(
+                                within_group + int(is_saved)
+                            ) % 3],
                             "frequency": (
                                 20 + segment_index * 3 + within_group + 10 * is_saved
                             ),
@@ -266,6 +269,42 @@ class BehaviorProfilingV2Tests(unittest.TestCase):
             [tick.get_text() for tick in clipped_axes[0].get_xticklabels()],
             ["Saved\nn=10", "Stopped\nn=10"],
         )
+
+    def test_selected_segments_are_drilled_down_by_treatment(self):
+        contrasts = eda_helpers_v2.build_outcome_contrasts(
+            self.data,
+            metrics=self.metrics,
+            segment_fields=self.segment_fields,
+            min_n=10,
+            reference=self.reference,
+        )
+        treatment_contrasts = (
+            eda_helpers_v2.build_selected_segment_treatment_contrasts(
+                self.data,
+                contrasts,
+                metrics=self.metrics,
+                segment_fields=self.segment_fields,
+                reference=self.reference,
+                top_n=2,
+                min_n=2,
+            )
+        )
+
+        self.assertEqual(set(treatment_contrasts["segment_rank"]), {1, 2})
+        self.assertEqual(
+            set(treatment_contrasts["Treatment"]),
+            {"Control", "Midpoint", "Tiered"},
+        )
+        self.assertTrue(treatment_contrasts["supported"].all())
+        self.assertTrue(treatment_contrasts["delta__frequency"].notna().all())
+        treatment_ax = eda_helpers_v2.plot_selected_segment_treatment_heatmap(
+            treatment_contrasts,
+            metrics=self.metrics,
+            save=False,
+            show=False,
+            close=False,
+        )
+        self.assertIn("Treatment drill-down", treatment_ax.get_title())
 
 if __name__ == "__main__":
     unittest.main()

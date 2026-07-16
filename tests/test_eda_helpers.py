@@ -14,9 +14,7 @@ from src import eda_helpers
 
 
 class MetricBoxplotViewsTests(unittest.TestCase):
-    fit_reference = staticmethod(
-        getattr(eda_helpers, "_fit_global_metric_reference")
-    )
+    fit_reference = staticmethod(eda_helpers.fit_behavior_reference)
     prepare_boxplot_data = staticmethod(
         getattr(eda_helpers, "_prepare_metric_boxplot_data")
     )
