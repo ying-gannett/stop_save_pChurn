@@ -202,7 +202,7 @@ class EdaHelpersTests(unittest.TestCase):
             show=False,
             close=False,
         )
-        contrast_ax = eda_helpers.plot_outcome_contrast_heatmap(
+        contrast_ax = eda_helpers.plot_profile_or_contrast_heatmap(
             self.contrasts,
             metrics=self.metrics,
             save=False,

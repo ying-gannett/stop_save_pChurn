@@ -334,6 +334,81 @@ def build_outcome_contrasts(
     )
 
 
+def build_treatment_contrasts(
+    data,
+    contrasts,
+    metrics,
+    segment_fields,
+    reference,
+    top_n=8,
+    min_n=5,
+):
+    """Drill selected behavioral segments down to the assigned Treatments."""
+    selected = contrasts.head(top_n).reset_index(drop=True).copy()
+    selected.insert(0, "segment_rank", np.arange(1, len(selected) + 1))
+    scores = transform_behavior_metrics(data, metrics, reference)
+    records = []
+
+    for _, selected_segment in selected.iterrows():
+        segment_data = _match_segment(data, selected_segment, segment_fields)
+        for treatment in _TREATMENT_ORDER:
+            treatment_data = segment_data[
+                segment_data["Treatment"].eq(treatment)
+            ]
+            saved = treatment_data[treatment_data[OUTCOME_COL].eq(SAVED)]
+            stopped = treatment_data[treatment_data[OUTCOME_COL].eq(STOPPED)]
+            saved_n = saved[ID_COL].nunique()
+            stopped_n = stopped[ID_COL].nunique()
+            total_users = saved_n + stopped_n
+            supported = saved_n >= min_n and stopped_n >= min_n
+
+            saved_medians = saved[metrics].median()
+            stopped_medians = stopped[metrics].median()
+            saved_scores = scores.loc[saved.index, metrics].median()
+            stopped_scores = scores.loc[stopped.index, metrics].median()
+            deltas = saved_scores - stopped_scores
+            if not supported:
+                deltas[:] = np.nan
+
+            finite_deltas = deltas.dropna()
+            dominant_metric = (
+                finite_deltas.abs().idxmax()
+                if not finite_deltas.empty
+                else None
+            )
+            records.append(
+                {
+                    "segment_rank": selected_segment["segment_rank"],
+                    "segment_label": selected_segment["segment_label"],
+                    **{
+                        field: selected_segment[field]
+                        for field in segment_fields
+                    },
+                    "Treatment": treatment,
+                    "n__saved": saved_n,
+                    "n__stopped": stopped_n,
+                    "total_users": total_users,
+                    "observed_saved_share": (
+                        saved_n / total_users if total_users else np.nan
+                    ),
+                    "supported": supported,
+                    **{
+                        f"median_saved__{metric}": saved_medians[metric]
+                        for metric in metrics
+                    },
+                    **{
+                        f"median_stopped__{metric}": stopped_medians[metric]
+                        for metric in metrics
+                    },
+                    **{f"delta__{metric}": deltas[metric] for metric in metrics},
+                    "contrast_magnitude": _vector_magnitude(deltas),
+                    "dominant_metric": dominant_metric,
+                }
+            )
+
+    return pd.DataFrame.from_records(records)
+
+
 def build_selected_segment_detail_table(
     data,
     contrasts,
@@ -452,81 +527,6 @@ def build_selected_segment_detail_table(
                 confidence_level=confidence_level,
             )
             records.append(record)
-
-    return pd.DataFrame.from_records(records)
-
-
-def build_treatment_contrasts(
-    data,
-    contrasts,
-    metrics,
-    segment_fields,
-    reference,
-    top_n=8,
-    min_n=5,
-):
-    """Drill selected behavioral segments down to the assigned Treatments."""
-    selected = contrasts.head(top_n).reset_index(drop=True).copy()
-    selected.insert(0, "segment_rank", np.arange(1, len(selected) + 1))
-    scores = transform_behavior_metrics(data, metrics, reference)
-    records = []
-
-    for _, selected_segment in selected.iterrows():
-        segment_data = _match_segment(data, selected_segment, segment_fields)
-        for treatment in _TREATMENT_ORDER:
-            treatment_data = segment_data[
-                segment_data["Treatment"].eq(treatment)
-            ]
-            saved = treatment_data[treatment_data[OUTCOME_COL].eq(SAVED)]
-            stopped = treatment_data[treatment_data[OUTCOME_COL].eq(STOPPED)]
-            saved_n = saved[ID_COL].nunique()
-            stopped_n = stopped[ID_COL].nunique()
-            total_users = saved_n + stopped_n
-            supported = saved_n >= min_n and stopped_n >= min_n
-
-            saved_medians = saved[metrics].median()
-            stopped_medians = stopped[metrics].median()
-            saved_scores = scores.loc[saved.index, metrics].median()
-            stopped_scores = scores.loc[stopped.index, metrics].median()
-            deltas = saved_scores - stopped_scores
-            if not supported:
-                deltas[:] = np.nan
-
-            finite_deltas = deltas.dropna()
-            dominant_metric = (
-                finite_deltas.abs().idxmax()
-                if not finite_deltas.empty
-                else None
-            )
-            records.append(
-                {
-                    "segment_rank": selected_segment["segment_rank"],
-                    "segment_label": selected_segment["segment_label"],
-                    **{
-                        field: selected_segment[field]
-                        for field in segment_fields
-                    },
-                    "Treatment": treatment,
-                    "n__saved": saved_n,
-                    "n__stopped": stopped_n,
-                    "total_users": total_users,
-                    "observed_saved_share": (
-                        saved_n / total_users if total_users else np.nan
-                    ),
-                    "supported": supported,
-                    **{
-                        f"median_saved__{metric}": saved_medians[metric]
-                        for metric in metrics
-                    },
-                    **{
-                        f"median_stopped__{metric}": stopped_medians[metric]
-                        for metric in metrics
-                    },
-                    **{f"delta__{metric}": deltas[metric] for metric in metrics},
-                    "contrast_magnitude": _vector_magnitude(deltas),
-                    "dominant_metric": dominant_metric,
-                }
-            )
 
     return pd.DataFrame.from_records(records)
 
@@ -752,58 +752,10 @@ def plot_metric_boxplot_views(
     return axes
 
 
-def _plot_behavior_heatmap(
-    matrix,
-    row_labels,
-    color_limit,
-    title,
-    y_label,
-    colorbar_label,
-    show,
-    save,
-    chart_folder,
-    file_name,
-    close,
-):
-    """Render the common heatmap style used by the behavioral analysis."""
-    matrix = matrix.copy()
-    matrix.index = row_labels
-    limit = float(color_limit)
-    fig_height = max(4.0, 0.48 * len(matrix) + 1.8)
-    fig_width = max(9.0, 1.8 * len(matrix.columns) + 6.0)
-    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
-    sns.heatmap(
-        matrix,
-        ax=ax,
-        cmap="vlag",
-        center=0,
-        vmin=-limit,
-        vmax=limit,
-        annot=True,
-        fmt=".2f",
-        linewidths=0.5,
-        linecolor="white",
-        cbar_kws={"label": colorbar_label},
-    )
-    ax.set_title(title)
-    ax.set_xlabel("Behavior metric")
-    ax.set_ylabel(y_label)
-    ax.tick_params(axis="x", rotation=0)
-    ax.tick_params(axis="y", rotation=0)
-    _finalize_chart(
-        fig,
-        show=show,
-        save=save,
-        chart_folder=chart_folder,
-        file_name=file_name,
-        close=close,
-    )
-    return ax
-
-
-def plot_behavior_profile_heatmap(
-    profiles,
+def plot_profile_or_contrast_heatmap(
+    input_data,
     metrics,
+    score_type="profile",
     max_rows=30,
     color_limit=2.0,
     title="Behavior profiles relative to primary contacted users",
@@ -813,106 +765,91 @@ def plot_behavior_profile_heatmap(
     file_name="behavior_profiles.png",
     close=None,
 ):
-    """Plot absolute segment profile scores as a compact heatmap."""
-    plot_data = profiles.head(max_rows)
-    matrix = plot_data[[f"score__{metric}" for metric in metrics]].copy()
-    matrix.columns = metrics
-    row_labels = [
-        f"{label}  (n={users:,})"
-        for label, users in zip(plot_data["segment_label"], plot_data["users"])
-    ]
-    return _plot_behavior_heatmap(
+    """Plot absolute segment profile scores or within-slice outcome differences in common IQR units."""
+
+    def _build_heatmap_artifacts(data, metrics, max_rows=None, score_type="profile"):
+        """Prepare the matrix and row labels for a heatmap."""
+        plot_data = data.head(max_rows).copy()
+        if plot_data.empty:
+            return None, None, None, None
+        
+        if score_type == "profile":
+            matrix = plot_data[[f"score__{metric}" for metric in metrics]].copy()
+            plot_data.loc[:, 'row_label']=plot_data["segment_label"]+' (n='+plot_data["users"].astype(str)+')'
+            y_label="Segment"
+            colorbar_label="Median relative to primary population (IQR units)"
+        else:
+            matrix = plot_data[[f"delta__{metric}" for metric in metrics]].copy()
+            colorbar_label="Saved minus Stopped median (IQR units)"
+            if 'Treatment' in plot_data.columns:
+                plot_data.loc[:, 'row_label']=plot_data["segment_rank"].astype(str)+'. '+plot_data["segment_label"]+' · '+plot_data["Treatment"]+' (n='+plot_data["n__saved"].astype(str)+'/'+plot_data["n__stopped"].astype(str)+')'
+                y_label="Selected segment × Treatment"
+            else:
+                plot_data.loc[:, 'row_label']=plot_data["segment_label"]+' (n='+plot_data["n__saved"].astype(str)+'/'+plot_data["n__stopped"].astype(str)+')'
+                y_label="Matched segment"
+        
+        matrix.columns = metrics
+        row_labels = plot_data['row_label'].tolist()
+        return matrix, row_labels, y_label, colorbar_label
+
+    def _plot_behavior_heatmap(
         matrix,
         row_labels,
         color_limit,
         title,
-        "Segment",
-        "Median relative to primary population (IQR units)",
+        y_label,
+        colorbar_label,
         show,
         save,
         chart_folder,
         file_name,
         close,
-    )
-
-
-def plot_outcome_contrast_heatmap(
-    contrasts,
-    metrics,
-    max_rows=20,
-    color_limit=1.5,
-    title="Behavior contrast: Saved minus Stopped",
-    show=False,
-    save=True,
-    chart_folder="charts",
-    file_name="saved_minus_stopped_profiles.png",
-    close=None,
-):
-    """Plot within-slice outcome differences in common IQR units."""
-    plot_data = contrasts.head(max_rows)
-    matrix = plot_data[[f"delta__{metric}" for metric in metrics]].copy()
-    matrix.columns = metrics
-    row_labels = [
-        f"{label}  (n={n_a:,}/{n_b:,})"
-        for label, n_a, n_b in zip(
-            plot_data["segment_label"],
-            plot_data["n__saved"],
-            plot_data["n__stopped"],
+    ):
+        """Render the common heatmap style used by the behavioral analysis."""
+        matrix = matrix.copy()
+        matrix.index = row_labels
+        limit = float(color_limit)
+        fig_height = max(4.0, 0.48 * len(matrix) + 1.8)
+        fig_width = max(9.0, 1.8 * len(matrix.columns) + 6.0)
+        fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+        sns.heatmap(
+            matrix,
+            ax=ax,
+            cmap="vlag",
+            center=0,
+            vmin=-limit,
+            vmax=limit,
+            annot=True,
+            fmt=".2f",
+            linewidths=0.5,
+            linecolor="white",
+            cbar_kws={"label": colorbar_label},
         )
-    ]
-    return _plot_behavior_heatmap(
-        matrix,
-        row_labels,
-        color_limit,
-        title,
-        "Matched segment",
-        "Saved minus Stopped median (IQR units)",
-        show,
-        save,
-        chart_folder,
-        file_name,
-        close,
-    )
+        ax.set_title(title)
+        ax.set_xlabel("Behavior metric")
+        ax.set_ylabel(y_label)
+        ax.tick_params(axis="x", rotation=0)
+        ax.tick_params(axis="y", rotation=0)
+        _finalize_chart(
+            fig,
+            show=show,
+            save=save,
+            chart_folder=chart_folder,
+            file_name=file_name,
+            close=close,
+        )
+        return ax
 
-
-def plot_selected_segment_treatment_heatmap(
-    treatment_contrasts,
-    metrics,
-    color_limit=1.5,
-    title="Treatment drill-down within selected behavioral segments",
-    show=False,
-    save=True,
-    chart_folder="charts",
-    file_name="selected_segment_treatment_contrasts.png",
-    close=None,
-):
-    """Plot supported Treatment-level Saved-minus-Stopped contrasts."""
-    plot_data = treatment_contrasts[treatment_contrasts["supported"]].copy()
-    if plot_data.empty:
+    matrix, row_labels, y_label, colorbar_label = _build_heatmap_artifacts(input_data, metrics, max_rows=max_rows, score_type=score_type)
+    if matrix is None or row_labels is None:
         return None
-
-    matrix = plot_data[[f"delta__{metric}" for metric in metrics]].copy()
-    matrix.columns = metrics
-    row_labels = [
-        (
-            f"{rank}. {label} · {treatment} "
-            f"(n={saved_n:,}/{stopped_n:,})"
-        )
-        for rank, label, treatment, saved_n, stopped_n in zip(
-            plot_data["segment_rank"],
-            plot_data["segment_label"],
-            plot_data["Treatment"],
-            plot_data["n__saved"],
-            plot_data["n__stopped"],
-        )
-    ]
     return _plot_behavior_heatmap(
         matrix,
         row_labels,
         color_limit,
         title,
-        "Selected segment × Treatment",
-        "Saved minus Stopped median (IQR units)",
+        y_label,
+        colorbar_label,
         show,
         save,
         chart_folder,
