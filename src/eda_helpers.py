@@ -347,7 +347,6 @@ def build_treatment_contrasts(
 ):
     """Drill selected behavioral segments down to the assigned Treatments."""
     selected = contrasts.head(top_n).reset_index(drop=True).copy()
-    # selected.insert(0, "segment_rank", np.arange(1, len(selected) + 1))
     scores = transform_behavior_metrics(data, metrics, reference)
     records = []
 
@@ -462,7 +461,6 @@ def build_selected_segment_detail_table(
         return float(lower), float(upper)
 
     selected = contrasts.head(top_n).reset_index(drop=True).copy()
-    # selected.insert(0, "segment_rank", np.arange(1, len(selected) + 1))
     rng = np.random.default_rng(random_state)
     records = []
 
@@ -785,7 +783,6 @@ def plot_profile_or_contrast_heatmap(
             colorbar_label="Saved minus Stopped median (IQR units)"
             plot_data.loc[:, 'row_label']=plot_data["segment_rank"].astype(str)+'. '+plot_data["segment_label"]+' (n='+plot_data["n__saved"].astype(str)+'/'+plot_data["n__stopped"].astype(str)+')'
             if 'Treatment' in plot_data.columns:
-                # plot_data.loc[:, 'row_label']=plot_data["segment_rank"].astype(str)+'. '+plot_data["segment_label"]+' · '+plot_data["Treatment"]+' (n='+plot_data["n__saved"].astype(str)+'/'+plot_data["n__stopped"].astype(str)+')'
                 y_label="Selected segment × Treatment"
             else:
                 y_label="Matched segment"
