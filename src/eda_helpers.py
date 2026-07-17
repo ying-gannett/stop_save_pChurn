@@ -324,7 +324,7 @@ def build_outcome_contrasts(
 
     if not records:
         raise ValueError("No Saved and Stopped profile rows share a segment.")
-    return (
+    rst = (
         pd.DataFrame.from_records(records)
         .sort_values(
             ["contrast_magnitude", "total_users"],
@@ -332,6 +332,8 @@ def build_outcome_contrasts(
         )
         .reset_index(drop=True)
     )
+    rst.insert(0, 'segment_rank', rst.index)
+    return rst
 
 
 def build_treatment_contrasts(
@@ -345,7 +347,7 @@ def build_treatment_contrasts(
 ):
     """Drill selected behavioral segments down to the assigned Treatments."""
     selected = contrasts.head(top_n).reset_index(drop=True).copy()
-    selected.insert(0, "segment_rank", np.arange(1, len(selected) + 1))
+    # selected.insert(0, "segment_rank", np.arange(1, len(selected) + 1))
     scores = transform_behavior_metrics(data, metrics, reference)
     records = []
 
@@ -379,7 +381,7 @@ def build_treatment_contrasts(
             records.append(
                 {
                     "segment_rank": selected_segment["segment_rank"],
-                    "segment_label": selected_segment["segment_label"],
+                    "segment_label": selected_segment["segment_label"]+f" · {treatment}",
                     **{
                         field: selected_segment[field]
                         for field in segment_fields
@@ -460,7 +462,7 @@ def build_selected_segment_detail_table(
         return float(lower), float(upper)
 
     selected = contrasts.head(top_n).reset_index(drop=True).copy()
-    selected.insert(0, "segment_rank", np.arange(1, len(selected) + 1))
+    # selected.insert(0, "segment_rank", np.arange(1, len(selected) + 1))
     rng = np.random.default_rng(random_state)
     records = []
 
@@ -781,11 +783,11 @@ def plot_profile_or_contrast_heatmap(
         else:
             matrix = plot_data[[f"delta__{metric}" for metric in metrics]].copy()
             colorbar_label="Saved minus Stopped median (IQR units)"
+            plot_data.loc[:, 'row_label']=plot_data["segment_rank"].astype(str)+'. '+plot_data["segment_label"]+' (n='+plot_data["n__saved"].astype(str)+'/'+plot_data["n__stopped"].astype(str)+')'
             if 'Treatment' in plot_data.columns:
-                plot_data.loc[:, 'row_label']=plot_data["segment_rank"].astype(str)+'. '+plot_data["segment_label"]+' · '+plot_data["Treatment"]+' (n='+plot_data["n__saved"].astype(str)+'/'+plot_data["n__stopped"].astype(str)+')'
+                # plot_data.loc[:, 'row_label']=plot_data["segment_rank"].astype(str)+'. '+plot_data["segment_label"]+' · '+plot_data["Treatment"]+' (n='+plot_data["n__saved"].astype(str)+'/'+plot_data["n__stopped"].astype(str)+')'
                 y_label="Selected segment × Treatment"
             else:
-                plot_data.loc[:, 'row_label']=plot_data["segment_label"]+' (n='+plot_data["n__saved"].astype(str)+'/'+plot_data["n__stopped"].astype(str)+')'
                 y_label="Matched segment"
         
         matrix.columns = metrics
@@ -913,7 +915,7 @@ def plot_top_behavior_contrasts(
             f"{outcome} n={int(counts.get(outcome, 0)):,}"
             for outcome in OUTCOMES
         )
-        ax.set_title(f"{contrast['segment_label']}\n{count_text}", fontsize=10)
+        ax.set_title(f"{contrast['segment_rank']}. {contrast['segment_label']}\n{count_text}", fontsize=10)
         ax.axhline(0, color="#666666", linewidth=0.8, linestyle="--")
         ax.set_xlabel("Behavior metric")
         ax.set_ylabel("Primary-population median/IQR units")
@@ -1004,11 +1006,13 @@ def plot_selected_segment_clipped_boxplot_grid(
             if column_index == 0:
                 ax.set_ylabel("Value")
                 wrapped_label = textwrap.fill(
-                    str(selected_segment["segment_label"]),
+                    str(selected_segment["segment_rank"])
+                    + ". "
+                    + str(selected_segment["segment_label"]),
                     width=42,
                 )
                 ax.text(
-                    -0.58,
+                    -0.5,
                     0.5,
                     wrapped_label,
                     transform=ax.transAxes,
@@ -1019,7 +1023,7 @@ def plot_selected_segment_clipped_boxplot_grid(
             else:
                 ax.set_ylabel("")
 
-    fig.suptitle(title, fontsize=15, y=0.995)
+    fig.suptitle(title, fontsize=15, x=0.6, y=0.98, ha='center')
     _finalize_chart(
         fig,
         show=show,
@@ -1027,6 +1031,6 @@ def plot_selected_segment_clipped_boxplot_grid(
         chart_folder=chart_folder,
         file_name=file_name,
         close=close,
-        tight_layout_kwargs={"rect": (0.22, 0, 1, 0.98), "h_pad": 1.2},
+        tight_layout_kwargs={"rect": (0.22, 0, 1, 0.98), "h_pad": 1.0},
     )
     return list(axes.ravel())
