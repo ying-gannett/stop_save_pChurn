@@ -259,7 +259,7 @@ class EdaHelpersTests(unittest.TestCase):
 
     def test_selected_segments_are_drilled_down_in_fixed_treatment_order(self):
         treatment_contrasts = (
-            eda_helpers.build_selected_segment_treatment_contrasts(
+            eda_helpers.build_treatment_contrasts(
                 self.data,
                 self.contrasts,
                 metrics=self.metrics,
