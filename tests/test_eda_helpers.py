@@ -195,9 +195,10 @@ class EdaHelpersTests(unittest.TestCase):
             )
 
     def test_profile_contrast_heatmaps_and_standardized_drilldown_render(self):
-        profile_ax = eda_helpers.plot_behavior_profile_heatmap(
+        profile_ax = eda_helpers.plot_profile_or_contrast_heatmap(
             self.profiles,
             metrics=self.metrics,
+            score_type="profile",
             save=False,
             show=False,
             close=False,
@@ -205,6 +206,8 @@ class EdaHelpersTests(unittest.TestCase):
         contrast_ax = eda_helpers.plot_profile_or_contrast_heatmap(
             self.contrasts,
             metrics=self.metrics,
+            score_type="contrast",
+            title="Saved minus Stopped",
             save=False,
             show=False,
             close=False,
@@ -269,9 +272,11 @@ class EdaHelpersTests(unittest.TestCase):
                 min_n=2,
             )
         )
-        treatment_ax = eda_helpers.plot_selected_segment_treatment_heatmap(
+        treatment_ax = eda_helpers.plot_profile_or_contrast_heatmap(
             treatment_contrasts,
             metrics=self.metrics,
+            score_type="contrast",
+            title="Treatment drill-down",
             save=False,
             show=False,
             close=False,
@@ -290,6 +295,40 @@ class EdaHelpersTests(unittest.TestCase):
         self.assertTrue(treatment_contrasts["supported"].all())
         self.assertTrue(treatment_contrasts["delta__frequency"].notna().all())
         self.assertIn("Treatment drill-down", treatment_ax.get_title())
+
+        axes = eda_helpers.plot_top_behavior_contrasts(
+            self.data,
+            treatment_contrasts,
+            metrics=self.metrics,
+            segment_fields=[*self.segment_fields, "Treatment"],
+            reference=self.reference,
+            top_n=2,
+            save=False,
+            show=False,
+            close=False,
+        )
+        self.assertEqual(len(axes), 2)
+        for ax in axes:
+            backgrounds = {
+                patch.get_gid()
+                for patch in ax.patches
+                if patch.get_gid() is not None
+            }
+            self.assertEqual(
+                backgrounds,
+                {
+                    "treatment-background-Control",
+                    "treatment-background-Midpoint",
+                    "treatment-background-Tiered",
+                },
+            )
+            self.assertEqual(
+                [tick.get_text() for tick in ax.get_xticklabels()],
+                self.metrics * len(eda_helpers._TREATMENT_ORDER),
+            )
+            treatment_headers = " ".join(text.get_text() for text in ax.texts)
+            for treatment in eda_helpers._TREATMENT_ORDER:
+                self.assertIn(treatment, treatment_headers)
 
 
 if __name__ == "__main__":
