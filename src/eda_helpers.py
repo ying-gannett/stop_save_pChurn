@@ -562,6 +562,52 @@ def _finalize_chart(
         plt.close(fig)
 
 
+def _plot_boxplot_with_points(
+    ax,
+    plot_data,
+    x,
+    y,
+    order,
+    hue,
+    hue_order,
+    palette,
+    show_points,
+    legend=True,
+    saturation=0.75,
+    dodge=True,
+):
+    """Render the box-and-point style shared by the behavioral charts."""
+    sns.boxplot(
+        data=plot_data,
+        x=x,
+        y=y,
+        order=order,
+        hue=hue,
+        hue_order=hue_order,
+        palette=palette,
+        saturation=saturation,
+        showfliers=True,
+        legend=legend,
+        ax=ax,
+    )
+    if show_points:
+        sns.stripplot(
+            data=plot_data,
+            x=x,
+            y=y,
+            order=order,
+            hue=hue,
+            hue_order=hue_order,
+            palette=palette,
+            alpha=0.25,
+            size=3,
+            jitter=0.2,
+            dodge=dodge,
+            legend=False,
+            ax=ax,
+        )
+
+
 def plot_metric_boxplot_views(
     data,
     metrics,
@@ -639,36 +685,21 @@ def plot_metric_boxplot_views(
         value_label="Value",
     ):
         """Plot one grouped metric boxplot axis."""
-        sns.boxplot(
-            data=plot_df,
+        _plot_boxplot_with_points(
+            ax=ax,
+            plot_data=plot_df,
             x="metric",
             y="value",
+            order=metrics,
             hue=group_col,
             hue_order=group_order,
             palette=palette,
             saturation=1,
-            showfliers=True,
-            ax=ax,
+            show_points=show_points,
         )
         ax.set_title(title)
         ax.set_xlabel("Metric")
         ax.set_ylabel(value_label)
-
-        if show_points:
-            sns.stripplot(
-                data=plot_df,
-                x="metric",
-                y="value",
-                hue=group_col,
-                hue_order=group_order,
-                palette=palette,
-                alpha=0.25,
-                size=3,
-                jitter=0.2,
-                dodge=True,
-                legend=False,
-                ax=ax,
-            )
 
         if rotate_xticks:
             plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
@@ -879,6 +910,7 @@ def plot_behavior_contrasts_boxplots(
     chart_folder="charts",
     file_name="top_behavior_contrasts.png",
     close=None,
+    show_points=True,
 ):
     """Drill into the strongest supported outcome contrasts with boxplots.
 
@@ -967,16 +999,16 @@ def plot_behavior_contrasts_boxplots(
                 for treatment, metric in plot_pairs
             ]
 
-        sns.boxplot(
-            data=long_data,
+        _plot_boxplot_with_points(
+            ax=ax,
+            plot_data=long_data,
             x=x_field,
             order=metric_order,
             y="score",
             hue=OUTCOME_COL,
             hue_order=OUTCOMES,
             palette=OUTCOME_COLORS,
-            showfliers=True,
-            ax=ax,
+            show_points=show_points,
         )
 
         if treatment_mode:
@@ -1127,6 +1159,7 @@ def plot_selected_segment_clipped_boxplot_grid(
     chart_folder="charts",
     file_name="selected_segments_raw_clipped.png",
     close=None,
+    show_points=True,
 ):
     """Plot clipped business-unit values for selected contrast rows."""
     selected = contrasts.head(top_n)
@@ -1152,17 +1185,18 @@ def plot_selected_segment_clipped_boxplot_grid(
                     "value": metric_values[metric].to_numpy(),
                 }
             ).dropna(subset=["value"])
-            sns.boxplot(
-                data=plot_data,
+            _plot_boxplot_with_points(
+                ax=ax,
+                plot_data=plot_data,
                 x=OUTCOME_COL,
                 y="value",
                 order=OUTCOMES,
                 hue=OUTCOME_COL,
                 hue_order=OUTCOMES,
                 palette=OUTCOME_COLORS,
-                showfliers=True,
                 legend=False,
-                ax=ax,
+                show_points=show_points,
+                dodge=False,
             )
             ax.set_xticks(
                 range(len(OUTCOMES)),

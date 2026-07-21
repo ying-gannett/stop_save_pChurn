@@ -163,6 +163,19 @@ class EdaHelpersTests(unittest.TestCase):
             ],
         ):
             np.testing.assert_allclose(actual, to_rgba(expected))
+        self.assertTrue(all(not ax.collections for ax in axes))
+
+        point_axes = eda_helpers.plot_metric_boxplot_views(
+            self.data,
+            metrics=self.metrics,
+            group_col="outcome",
+            group_order=list(eda_helpers.OUTCOMES),
+            show_points=True,
+            show=False,
+            save=False,
+            close=False,
+        )
+        self.assertTrue(all(ax.collections for ax in point_axes))
 
     def test_outcome_contrasts_reuse_the_matched_profile_results(self):
         self.assertEqual(len(self.profiles), 8)
@@ -219,6 +232,7 @@ class EdaHelpersTests(unittest.TestCase):
             segment_fields=self.segment_fields,
             reference=self.reference,
             top_n=2,
+            show_points=True,
             save=False,
             show=False,
             close=False,
@@ -228,6 +242,7 @@ class EdaHelpersTests(unittest.TestCase):
         self.assertIn("Saved minus Stopped", contrast_ax.get_title())
         self.assertEqual(len(axes), 2)
         self.assertEqual(axes[0].get_ylim(), axes[1].get_ylim())
+        self.assertTrue(all(ax.collections for ax in axes))
 
     def test_selected_segment_details_add_spread_and_bootstrap_uncertainty(self):
         details = eda_helpers.build_selected_segment_detail_table(
@@ -247,6 +262,7 @@ class EdaHelpersTests(unittest.TestCase):
             segment_fields=self.segment_fields,
             reference=self.reference,
             top_n=2,
+            show_points=True,
             save=False,
             show=False,
             close=False,
@@ -259,6 +275,7 @@ class EdaHelpersTests(unittest.TestCase):
         self.assertTrue(details["clipped_median_difference_ci_lower"].notna().all())
         self.assertEqual(len(axes), 2 * len(self.metrics))
         self.assertEqual(axes[0].get_ylim(), axes[len(self.metrics)].get_ylim())
+        self.assertTrue(all(ax.collections for ax in axes))
 
     def test_selected_segments_are_drilled_down_in_fixed_treatment_order(self):
         treatment_contrasts = (
