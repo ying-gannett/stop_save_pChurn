@@ -872,6 +872,7 @@ def plot_top_behavior_contrasts(
     top_n=8,
     n_cols=2,
     panel_size=(7, 4),
+    treatment_layout="treatment_first",
     title="Top supported behavior contrasts: Saved vs Stopped",
     show=False,
     save=True,
@@ -881,10 +882,11 @@ def plot_top_behavior_contrasts(
 ):
     """Drill into the strongest supported outcome contrasts with boxplots.
 
-    Treatment-level contrasts retain one panel per selected pooled segment and
-    arrange the metric boxes in Treatment-colored bands within that panel.
+    Treatment-level contrasts retain one panel per selected pooled segment.
+    Within each panel, Treatment can be the outer or inner grouping.
     """
     treatment_mode = "Treatment" in segment_fields
+    metric_first = treatment_mode and treatment_layout == "metric_first"
     base_segment_fields = [
         field for field in segment_fields if field != "Treatment"
     ]
@@ -947,10 +949,22 @@ def plot_top_behavior_contrasts(
             long_data[x_field] = (
                 long_data["Treatment"] + "__" + long_data["metric"]
             )
+            plot_pairs = (
+                [
+                    (treatment, metric)
+                    for metric in metrics
+                    for treatment in treatments
+                ]
+                if metric_first
+                else [
+                    (treatment, metric)
+                    for treatment in treatments
+                    for metric in metrics
+                ]
+            )
             metric_order = [
                 f"{treatment}__{metric}"
-                for treatment in treatments
-                for metric in metrics
+                for treatment, metric in plot_pairs
             ]
 
         sns.boxplot(
@@ -969,9 +983,66 @@ def plot_top_behavior_contrasts(
             counts = segment_data.groupby(
                 ["Treatment", OUTCOME_COL], observed=True
             )[ID_COL].nunique()
-            for treatment_index, treatment in enumerate(treatments):
-                start = treatment_index * len(metrics) - 0.5
-                end = (treatment_index + 1) * len(metrics) - 0.5
+
+            if metric_first:
+                background_bands = [
+                    (position - 0.5, position + 0.5, treatment)
+                    for position, (treatment, _) in enumerate(plot_pairs)
+                ]
+                headers = [
+                    (
+                        metric_index * len(treatments) - 0.5,
+                        (metric_index + 1) * len(treatments) - 0.5,
+                        metric,
+                        "#333333",
+                    )
+                    for metric_index, metric in enumerate(metrics)
+                ]
+                tick_labels = treatments * len(metrics)
+                count_text = " | ".join(
+                    (
+                        f"{treatment}: "
+                        f"Saved n={int(counts.get((treatment, SAVED), 0)):,}, "
+                        f"Stopped n={int(counts.get((treatment, STOPPED), 0)):,}"
+                    )
+                    for treatment in treatments
+                )
+                panel_title = (
+                    f"{contrast['segment_rank']}. "
+                    f"{_segment_label(contrast, base_segment_fields)}\n"
+                    f"{count_text}"
+                )
+                x_label = "Treatment within behavior metric"
+            else:
+                background_bands = [
+                    (
+                        treatment_index * len(metrics) - 0.5,
+                        (treatment_index + 1) * len(metrics) - 0.5,
+                        treatment,
+                    )
+                    for treatment_index, treatment in enumerate(treatments)
+                ]
+                headers = [
+                    (
+                        start,
+                        end,
+                        (
+                            f"{treatment}\n"
+                            f"Saved n={int(counts.get((treatment, SAVED), 0)):,} | "
+                            f"Stopped n={int(counts.get((treatment, STOPPED), 0)):,}"
+                        ),
+                        _GROUP_COLORS["treatment"][treatment.lower()],
+                    )
+                    for start, end, treatment in background_bands
+                ]
+                tick_labels = list(metrics) * len(treatments)
+                panel_title = (
+                    f"{contrast['segment_rank']}. "
+                    f"{_segment_label(contrast, base_segment_fields)}"
+                )
+                x_label = "Behavior metric within Treatment"
+
+            for start, end, treatment in background_bands:
                 background = ax.axvspan(
                     start,
                     end,
@@ -980,36 +1051,26 @@ def plot_top_behavior_contrasts(
                     zorder=0,
                 )
                 background.set_gid(f"treatment-background-{treatment}")
-                treatment_counts = counts.get(treatment, pd.Series(dtype=int))
+
+            for header_index, (start, end, header, color) in enumerate(headers):
                 ax.text(
                     (start + end) / 2,
                     1.01,
-                    (
-                        f"{treatment}\n"
-                        f"Saved n={int(treatment_counts.get(SAVED, 0)):,} | "
-                        f"Stopped n={int(treatment_counts.get(STOPPED, 0)):,}"
-                    ),
-                    color=_GROUP_COLORS["treatment"][treatment.lower()],
+                    header,
+                    color=color,
                     fontsize=8,
                     fontweight="bold",
                     ha="center",
                     va="bottom",
                     transform=ax.get_xaxis_transform(),
                 )
-                if treatment_index:
+                if header_index:
                     ax.axvline(start, color="white", linewidth=2, zorder=1)
 
             ax.set_xticks(range(len(metric_order)))
-            ax.set_xticklabels(list(metrics) * len(treatments))
-            ax.set_title(
-                (
-                    f"{contrast['segment_rank']}. "
-                    f"{_segment_label(contrast, base_segment_fields)}"
-                ),
-                fontsize=10,
-                pad=38,
-            )
-            ax.set_xlabel("Behavior metric within Treatment")
+            ax.set_xticklabels(tick_labels)
+            ax.set_title(panel_title, fontsize=10, pad=38)
+            ax.set_xlabel(x_label)
         else:
             counts = segment_data.groupby(OUTCOME_COL, observed=True)[
                 ID_COL

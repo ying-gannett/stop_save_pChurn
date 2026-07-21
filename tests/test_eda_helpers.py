@@ -330,6 +330,37 @@ class EdaHelpersTests(unittest.TestCase):
             for treatment in eda_helpers._TREATMENT_ORDER:
                 self.assertIn(treatment, treatment_headers)
 
+        metric_first_axes = eda_helpers.plot_top_behavior_contrasts(
+            self.data,
+            treatment_contrasts,
+            metrics=self.metrics,
+            segment_fields=[*self.segment_fields, "Treatment"],
+            reference=self.reference,
+            top_n=2,
+            treatment_layout="metric_first",
+            save=False,
+            show=False,
+            close=False,
+        )
+        self.assertEqual(len(metric_first_axes), 2)
+        for ax in metric_first_axes:
+            backgrounds = [
+                patch.get_gid()
+                for patch in ax.patches
+                if patch.get_gid() is not None
+            ]
+            self.assertEqual(
+                len(backgrounds),
+                len(self.metrics) * len(eda_helpers._TREATMENT_ORDER),
+            )
+            self.assertEqual(
+                [tick.get_text() for tick in ax.get_xticklabels()],
+                eda_helpers._TREATMENT_ORDER * len(self.metrics),
+            )
+            metric_headers = " ".join(text.get_text() for text in ax.texts)
+            for metric in self.metrics:
+                self.assertIn(metric, metric_headers)
+
 
 if __name__ == "__main__":
     unittest.main()
