@@ -212,7 +212,7 @@ class EdaHelpersTests(unittest.TestCase):
             show=False,
             close=False,
         )
-        axes = eda_helpers.plot_top_behavior_contrasts(
+        axes = eda_helpers.plot_behavior_contrasts_boxplots(
             self.data,
             self.contrasts,
             metrics=self.metrics,
@@ -296,7 +296,7 @@ class EdaHelpersTests(unittest.TestCase):
         self.assertTrue(treatment_contrasts["delta__frequency"].notna().all())
         self.assertIn("Treatment drill-down", treatment_ax.get_title())
 
-        axes = eda_helpers.plot_top_behavior_contrasts(
+        axes = eda_helpers.plot_behavior_contrasts_boxplots(
             self.data,
             treatment_contrasts,
             metrics=self.metrics,
@@ -330,7 +330,7 @@ class EdaHelpersTests(unittest.TestCase):
             for treatment in eda_helpers._TREATMENT_ORDER:
                 self.assertIn(treatment, treatment_headers)
 
-        metric_first_axes = eda_helpers.plot_top_behavior_contrasts(
+        metric_first_axes = eda_helpers.plot_behavior_contrasts_boxplots(
             self.data,
             treatment_contrasts,
             metrics=self.metrics,

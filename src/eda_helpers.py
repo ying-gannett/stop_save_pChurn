@@ -863,7 +863,7 @@ def plot_profile_or_contrast_heatmap(
     )
 
 
-def plot_top_behavior_contrasts(
+def plot_behavior_contrasts_boxplots(
     data,
     contrasts,
     metrics,
