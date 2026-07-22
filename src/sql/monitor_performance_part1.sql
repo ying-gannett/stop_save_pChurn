@@ -9,8 +9,8 @@
 
 -- create or replace table `gannett-datascience.test_results_zone.ss_test_result_v2`
 -- as
--- create or replace table `gannett-datascience.test_results_zone.ss_test_result_v3-1`
--- as
+create or replace table `gannett-datascience.test_results_zone.ss_test_result_v3-1`
+as
 with cleanup as (
   SELECT distinct    
     lower(trim(subscription)) as billing_account, -- zuora_subscriptionid (Bart) = billing_account (BQ)
@@ -150,10 +150,12 @@ select
   case
     when perm_stoped=1 and __earlist_cancel_date is not null then 1
     when perm_stoped=0 and __earlist_cancel_date is null then 0
+    when __earlist_contact_date is null then 0
     else null
   end as churned,
   y.risk_tier as src_risk_tier,
-  z.churn_truth as pchurn_truth,
+  -- z.churn_truth as pchurn_truth,
+  zf.frequency, zf.breadth, zf.tenure, zf.tt_cost,
   if(__earlist_contact_date<pricing_effective_date, 'Contact Before Pricing', 'Contact On/After Pricing') as contact_timing
 from (
   select distinct
@@ -188,9 +190,12 @@ from (
 left join `gannett-datascience.test_activation_zone.stop_save_test_Bart` y on
   lower(trim(y.billing_account)) = lower(trim(b.billing_account)) 
   and y.inference_date = b.inference_date
-left join `gannett-enterprise-data.models_sz.source_pchurn_segments` z on
-  y.inference_date = z.inference_date
-  and y.id_subscrip = z.id_subscrip;
+-- left join `gannett-enterprise-data.models_sz.source_pchurn_segments` z on
+--   y.inference_date = z.inference_date
+--   and y.id_subscrip = z.id_subscrip
+left join `gannett-enterprise-data.models_sz.source_pchurn_staging` zf on
+  b.inference_date = zf.inference_date
+  and b.id_subscrip = zf.id_subscrip;
 
 
 
