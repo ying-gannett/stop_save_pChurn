@@ -1,5 +1,5 @@
--- create or replace table `gannett-datascience.test_results_zone.ss_test_result_v3-2`
--- as
+create or replace table `gannett-datascience.test_results_zone.ss_test_result_v3-2`
+as
 with payment as ( 
   select 
     *
@@ -26,24 +26,30 @@ with payment as (
   and balance >= 0
 ),
 p1 as (
-  select *, concat(Treatment, ' - ', src_risk_tier) as treatment_plus_tier 
+  select 
+    *, 
+    concat(Treatment, ' - ', src_risk_tier) as treatment_plus_tier,
+    cast(REGEXP_EXTRACT(pricegroup, r'(\d+)') as int64) as pricegroup_order
   from `gannett-datascience.test_results_zone.ss_test_result_v3-1`
-  where churned is not null
+  where id_subscrip is not null 
+  and billing_account != 'mc-s000207628' 
+  and id_subscrip not in (49964082, 79445242, 76087016)   -- first two were priced twice, third one perm stopped twice
+  and churned in (0, 1, 2)   -- conflicts
 ),
 paid as (
   select
     billing_account, id_subscrip,
     sum(bill_amount_raw) as tt_paid_raw,
     sum(bill_amount_save_once) as tt_paid_save_once,
-    if(sum(repeatedly_called)>0, 1, 0) as repeatedly_called,
+    if(sum(pay_less_than_ss)>0, 1, 0) as pay_less_than_ss,
     if(sum(skpi_gap_wip)>0, 1, 0) as skpi_gap_wip,
   from (
     select
       p1.billing_account, p1.id_subscrip,
       p.billing_amount as bill_amount_raw,
-      if(p.billing_amount < p1.offered_rate, p1.offered_rate, p.billing_amount) as bill_amount_save_once,    -- 9 payments in this case
-      if(p.billing_amount < p1.offered_rate, 1, 0) as repeatedly_called,
-      if(p.billing_amount = p1.new_rate, 1, 0) as skpi_gap_wip  -- 29 payments in this cases. Asking for SKPI data
+      if(p.billing_amount < p1.stop_save_price, p1.stop_save_price, p.billing_amount) as bill_amount_save_once,    -- 9 payments in this case
+      if(p.billing_amount < p1.stop_save_price, 1, 0) as pay_less_than_ss,
+      if(p.billing_amount = p1.step_up_price, 1, 0) as skpi_gap_wip  -- 29 payments in this cases. Asking for SKPI data
     from p1
     join payment p on
       p1.billing_account = p.billing_account
@@ -55,6 +61,11 @@ paid as (
 )
 select 
   * except (tt_paid_raw, tt_paid_save_once, skpi_gap_wip),
+  case
+    when status='No Action yet' then '0 contact'
+    when call_counts>1 or click_cancel_counts>1 or pay_less_than_ss=1 then '2+ contact'
+    else '1 contact'
+  end as repeatedly_contacted,
   if(churned=0, tt_paid_raw, 0) as tt_paid_raw,
   if(churned=0, tt_paid_save_once, 0) as tt_paid_save_once,
 from (
@@ -62,14 +73,14 @@ from (
     p1.*, 
     coalesce(p.tt_paid_raw, 0) as tt_paid_raw,
     coalesce(p.tt_paid_save_once, 0) as tt_paid_save_once,
-    coalesce(p.repeatedly_called, 0) as repeatedly_called,
+    coalesce(p.pay_less_than_ss, 0) as pay_less_than_ss,
     coalesce(p.skpi_gap_wip, 0) as skpi_gap_wip
   from p1
   left join paid p on
     p1.billing_account = p.billing_account
     and p1.id_subscrip = p.id_subscrip   
 )
-where skpi_gap_wip = 0 or churned = 1   -- exclude skpi_gap_wip=1 and churned=0
+-- where skpi_gap_wip = 0 or churned = 1   -- exclude skpi_gap_wip=1 and churned=0
 
 
 

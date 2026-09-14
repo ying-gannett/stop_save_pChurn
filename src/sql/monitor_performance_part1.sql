@@ -9,39 +9,33 @@
 
 create or replace table `gannett-datascience.test_results_zone.ss_test_result_v3-1`
 as
-with cleanup as (
-  SELECT distinct    
-    lower(trim(subscription)) as billing_account, -- zuora_subscriptionid = billing_account
-    pricegroup,
-    currentrate as start_price, 
-    newrate as step_up_price,
-    stopsave as stop_save_price,
-    date(effective) as pricing_effective_date,
-    if(modeltype='PCHURN', 'Three-Offer Cohort', 'Two-Offer Cohort') as cohort, 
-    case 
-      when grouptype='MIDPOINT' then 'Midpoint'
-      when grouptype='CONTROL' then 'Control'
-      else 'Tiered'
-    end as Treatment,
-    case 
-      when filedate = '2026-04-08' then date('2026-03-29')  -- filedate 4/8 uses inference_date 3/29
-      when filedate = '2026-04-09' then date('2026-04-05')  -- filedate 4/9 uses inference_date 4/5
-      else date_trunc(filedate, week(Sunday))               -- once per week going forward
-    end as inference_date,
-    -- account, term, length, filedate, ebill, paymentmethod, product, reason, brandid, marketid, grouptype,
-  FROM `gannett-datascience.test_results_zone.stop_save_test_applied_Bart`
-  -- where filedate != '2026-08-21'
-),
-raw as (  -- cleaned ss_test_applied
+with raw as (  -- cleaned ss_test_applied
   select 
     *, 
     date_add(inference_date, interval 5 day) as email_date 
-  from cleanup
-),
-gcp_events as (
-  select * from `gannett-datascience.test_results_zone.ss_test_result_v3-0_gcp_event` 
-  -- todo: WIP EDE-14782 checking why no action while vol perm is tracked. Temp exclude them until issue resolved.  
-  where conflict_tag = 'No'  
+  from (
+    SELECT distinct    
+      lower(trim(subscription)) as billing_account, -- zuora_subscriptionid = billing_account
+      pricegroup,
+      currentrate as start_price, 
+      newrate as step_up_price,
+      stopsave as stop_save_price,
+      date(effective) as pricing_effective_date,
+      if(modeltype='PCHURN', 'Three-Offer Cohort', 'Two-Offer Cohort') as cohort, 
+      case 
+        when grouptype='MIDPOINT' then 'Midpoint'
+        when grouptype='CONTROL' then 'Control'
+        else 'Tiered'
+      end as Treatment,
+      case 
+        when filedate = '2026-04-08' then date('2026-03-29')  -- filedate 4/8 uses inference_date 3/29
+        when filedate = '2026-04-09' then date('2026-04-05')  -- filedate 4/9 uses inference_date 4/5
+        else date_trunc(filedate, week(Sunday))               -- once per week going forward
+      end as inference_date,
+      -- account, term, length, filedate, ebill, paymentmethod, product, reason, brandid, marketid, grouptype,
+    FROM `gannett-datascience.test_results_zone.stop_save_test_applied_Bart`
+    -- where filedate != '2026-08-21'
+  )
 ),
 lk as (   -- remove
   SELECT distinct 
@@ -51,23 +45,35 @@ lk as (   -- remove
   from `gannett-enterprise-data.consumers_linkage_cz.subscription_link_latest` l 
   where l.billing_system = 'ZUORA' and circ_site != 'PLAY'
 ),
-ss_applied as (   -- remove. link billing_account and id_subscrip
-  select 
-    lk.id_subscrip,
-    raw.*
-  from raw 
-  left join lk on
-  raw.billing_account = lk.billing_account   
-  where raw.cohort = 'Two-Offer Cohort'
-  union all
-  select 
-    p.id_subscrip,
-    raw.*
-  from raw 
-  left join `gannett-datascience.test_activation_zone.stop_save_test_Bart` p on
-  raw.billing_account = lower(trim(p.billing_account))   
-  and raw.inference_date = p.inference_date
-  where raw.cohort = 'Three-Offer Cohort' 
+ss_applied as (   -- 81973. remove. link billing_account and id_subscrip
+  select * from (
+    select 
+      lk.id_subscrip,
+      raw.*
+    from raw 
+    left join lk on
+    raw.billing_account = lk.billing_account   
+    where raw.cohort = 'Two-Offer Cohort'
+    union all
+    select 
+      p.id_subscrip,
+      raw.*
+    from raw 
+    left join `gannett-datascience.test_activation_zone.stop_save_test_Bart` p on
+    raw.billing_account = lower(trim(p.billing_account))   
+    and raw.inference_date = p.inference_date
+    where raw.cohort = 'Three-Offer Cohort' 
+  )
+  where id_subscrip is not null 
+  QUALIFY 
+  COUNT(DISTINCT id_subscrip) OVER(PARTITION BY billing_account) = 1
+  and 
+  COUNT(DISTINCT email_date) OVER(PARTITION BY billing_account) = 1
+),
+gcp_events as (
+  select * from `gannett-datascience.test_results_zone.ss_test_result_v3-0_gcp_event` 
+  -- todo: WIP EDE-14782 checking why no action while vol perm is tracked. Temp exclude them until issue resolved.  
+  where conflict_tag = 'No'  
 ),
 call_center as (  -- Delete: called in after email date 
   select distinct       
