@@ -30,6 +30,8 @@ with raw as (  -- cleaned ss_test_applied
       case 
         when filedate = '2026-04-08' then date('2026-03-29')  -- filedate 4/8 uses inference_date 3/29
         when filedate = '2026-04-09' then date('2026-04-05')  -- filedate 4/9 uses inference_date 4/5
+        when filedate = '2026-08-31' then date('2026-08-23')  -- filedate 8/31 ~ inference_date 8/23
+        when filedate = '2026-09-07' then date('2026-08-30')  -- filedate 9/7 ~ inference_date 8/30
         else date_trunc(filedate, week(Sunday))               -- once per week going forward
       end as inference_date,
       -- account, term, length, filedate, ebill, paymentmethod, product, reason, brandid, marketid, grouptype,
