@@ -38,7 +38,6 @@ with raw as (  -- cleaned ss_test_applied
       end as inference_date,
       -- account, term, length, filedate, ebill, paymentmethod, product, reason, brandid, marketid, grouptype,
     FROM `gannett-datascience.test_results_zone.stop_save_test_applied_Bart`
-    -- where filedate != '2026-08-21'
   )
 ),
 lk as (  
@@ -74,21 +73,16 @@ ss_applied as (   -- link billing_account and id_subscrip
   and 
   COUNT(DISTINCT email_date) OVER(PARTITION BY billing_account) = 1
 ),
-gcp_events as (
-  select * from `gannett-datascience.test_results_zone.ss_test_result_v3-0_gcp_event` 
-  -- todo: WIP EDE-14782 checking why no action while vol perm is tracked. Temp exclude them until issue resolved.  
-  where conflict_tag = 'No'  
-),
 b as (
   select distinct
     ss_applied.* except(id_subscrip), 
     ss_applied.id_subscrip as id_subscrip_manual, 
     g.* except(zuora_billing_account, pricing_notice_date, pricing_effective_date, pre_pricing_monthly_price, target_monthly_price) 
   from ss_applied
-  left join gcp_events g on
+  left join `gannett-datascience.test_results_zone.ss_test_result_v3-0_gcp_event` g on
     ss_applied.billing_account = g.zuora_billing_account
 ),
-p1 as (   -- 75101
+p1 as (
   select
     b.*,
     y.risk_tier as src_risk_tier,
@@ -102,7 +96,6 @@ p1 as (   -- 75101
   left join `gannett-enterprise-data.models_sz.source_pchurn_staging` zf on
     b.inference_date = zf.inference_date
     and b.id_subscrip = zf.id_subscrip
-  where b.churn_code is not null
 ),
 pays as ( 
   select 
@@ -155,7 +148,7 @@ paid as (
   group by 1, 2 
 )
 select 
-  * except(paid_lower_than_ss, paid_target, Repeat_StopSaves),
+  * except(paid_lower_than_ss, Repeat_StopSaves),
   case 
     when paid_lower_than_ss=1 and Repeat_StopSaves='not repeate stop-saves' 
     then if(contains_substr(contact_groups, '|'), 'seek offer both channels', 'seek offer 2+')
@@ -173,10 +166,9 @@ from (
     p1.billing_account = p.billing_account
     and p1.id_subscrip = p.id_subscrip   
 )
-where paid_target = 0;   -- exclude 53 users who contacted but pay target price, 75048 final left
-
-
-
+where paid_target = 0   -- exclude 60 users who contacted but pay target price 
+  and conflict_tag = 'No'  -- exclude 1964(Y/N = 1964/101834 | 2%) vol perm without contact associated. EDE-14782 closed and can't explain. 
+  and churn_code is not null  -- 28 priced users not covered in consumer_events 
 
 
 

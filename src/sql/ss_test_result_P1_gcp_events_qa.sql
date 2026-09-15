@@ -16,7 +16,7 @@
     if(g.id_subscrip is null, 'Not found in GCP consumer_events table', 'Overlap of GCP and manual extraction') as is_Overlap,
     count(*), count(distinct y.id_subscrip) 
   FROM `gannett-datascience.test_results_zone.ss_test_result_v3-2` y
-  left join `gannett-datascience.test_results_zone.ss_test_result_v3-1_source_gcp_event` g on
+  left join `gannett-datascience.test_results_zone.ss_test_result_v3-0_gcp_event` g on
     g.id_subscrip = y.id_subscrip
   group by 1;
 --
@@ -72,7 +72,7 @@
       y.__create_date, y.perm_stop_date as perm_stop_date_y, y.is_vol_perm as is_vol_perm_y, 
       g.perm_stop_sys_date, g.perm_stop_date as perm_stop_date_g, coalesce(g.is_vol_perm, false) as is_vol_perm_g
     from `gannett-datascience.test_results_zone.ss_test_result_v3-2` y    
-    join `gannett-datascience.test_results_zone.ss_test_result_v3-1_source_gcp_event` g on
+    join `gannett-datascience.test_results_zone.ss_test_result_v3-0_gcp_event` g on
       y.id_subscrip = g.id_subscrip
     where y.id_subscrip is not null and y.billing_account != 'mc-s000207628' and y.id_subscrip not in (49964082, 79445242, 76087016)
   );
@@ -81,7 +81,7 @@
 -- sample list for Q4 !!!!
   select distinct
     id_subscrip, pricing_notice_date, perm_stop_sys_date, perm_stop_date, is_vol_perm, pricing_effective_date
-  FROM `gannett-datascience.test_results_zone.ss_test_result_v3-1_source_gcp_event`
+  FROM `gannett-datascience.test_results_zone.ss_test_result_v3-0_gcp_event`
   where 
   id_subscrip in (    -- 1. limit to 76297 valid experiment idsub 
     select distinct id_subscrip from `gannett-datascience.test_results_zone.ss_test_result_v3-1` y 
