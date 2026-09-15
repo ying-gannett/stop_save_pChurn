@@ -65,6 +65,7 @@ The data pipeline is orchestrated by an AI agent skill or can be run directly:
     - **Run**: You can fire the skill using natural language prompts.
       - *Example 1 (Churn):* "Prepare the stop save source data for 2026-03-31, 04-07, 04-14, and 04-21. The target BQ table is gannett-datascience.test_activation_zone.ss_test_source."
       - *Example 2 (GA4):* "Run the online cancel GA4 data pipeline for days between 2026-04-03 and 2026-04-09. Date mode is "exact". The target BQ table is gannett-datascience.test_activation_zone.ss_test_online_cancel_raw, partitioned by event_date. Skip the local download."
+      - *Example 3 (GA4 Platform):* "Run the raw_ga_platorm data pipeline for days between 2025-12-29 and 2026-01-04. Date mode is "exact". The target BQ table is gannett-datascience.test_activation_zone.ss_test_ga4_platform, partitioned by event_date. Skip the local download."
 2.  **Directly**: 
     ```bash
     python src/data_processing.py
@@ -82,9 +83,14 @@ The data pipeline is orchestrated by an AI agent skill or can be run directly:
         "Execute raw_online_cancel.sql for <days until last Sunday>. Date mode is "exact". The target BQ table is <gannett-datascience.test_activation_zone.ss_test_online_cancel_raw>, partitioned by event_date. Skip the local download."
     b. **Directly**:
         "uv run python src/run_pipeline.py --sql-file src/sql/raw_online_cancel.sql --run-date <2026-05-02> --table ss_test_online_cancel_raw --partition-field event_date --date-mode exact --guardrail-table "" --skip-download --catch-up"
-3. Weekly Friday (**Intervention Data: Out of the workflow**): 
+3. Weekly Tuesday (GA4 platform Data: GA4 catch-up run for the past week): 
+    a. **Via Agent**:
+        "Execute raw_ga_platform.sql for <days until last Sunday>. Date mode is "exact". The target BQ table is <gannett-datascience.test_activation_zone.ss_test_ga4_platform>, partitioned by event_date. Skip the local download."
+    b. **Directly**:
+        "uv run python src/run_pipeline.py --sql-file src/sql/raw_ga_platform.sql --run-date <2026-05-02> --table ss_test_ga4_platform --partition-field event_date --date-mode exact --guardrail-table "" --skip-download --catch-up"
+4. Weekly Friday (**Intervention Data: Out of the workflow**): 
     Take Step 1 result --> <gannett-datascience.test_results_zone.stop_save_test_applied_Bart>
-4. Weekly Tuesday (Call Center Cancell Data: SKPI):
+5. Weekly Tuesday (Call Center Cancell Data: SKPI):
     Load SKPI data from spreadsheet into GCP
         "LOAD DATA INTO `gannett-datascience.test_activation_zone.ss_call_center`
         FROM FILES (
@@ -92,7 +98,7 @@ The data pipeline is orchestrated by an AI agent skill or can be run directly:
         uris = ['gs://gannett-data-science/Ying/ss_test_callcenter_data/ss_callcenter-0501-to-0518.csv']
         )
         "
-5. Weekly Monday (Step 2 + 3 + 4): 
+6. Weekly Monday (Step 2 + 3 + 4): 
     a. **Via Agent**:
         "Execute monitor_performance.sql. The target BQ table is <gannett-datascience.test_results_zone.ss_test_result_v2>."
     b. **Directly**:
