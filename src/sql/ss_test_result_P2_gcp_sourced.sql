@@ -10,6 +10,7 @@
     -- TIERED: RISK1-5 maintain pchurn ratio.
 
 create or replace table `gannett-datascience.test_results_zone.ss_test_result_p1_p2_combined`
+-- create or replace table `gannett-datascience.test_results_zone.ss_test_result_p1_p2_combined_unfiltered`
 as
 with raw as (  -- cleaned ss_test_applied
   select 
