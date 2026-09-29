@@ -173,3 +173,13 @@ from (
     p1.billing_account = p.billing_account
     and p1.id_subscrip = p.id_subscrip   
 );
+
+
+create or replace table `gannett-datascience.test_results_zone.ss_test_result_p1_p2_combined`
+as
+select * from `gannett-datascience.test_results_zone.ss_test_result_p1_p2_combined_unfiltered`
+where paid_target = 0   -- exclude 60 users who contacted but pay target price 
+  and conflict_tag = 'No'  -- exclude 1964(Y/N = 1964/101834 | 2%) vol perm without contact associated(EDE-14782 closed and can't explain) or invol perm with contact associated. 
+  and conflict_tag is not null  -- excldue 28 priced users not covered in consumer_events table
+  -- and is_two_payment_cycle_ago = 1 -- only matured users
+;
