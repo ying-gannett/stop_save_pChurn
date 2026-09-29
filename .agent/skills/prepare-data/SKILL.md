@@ -1,57 +1,71 @@
 ---
 name: prepare-data
-description: Data preparation and assessment pipeline for the pChurn Stop & Save project. Use this when the user asks to run the data pipeline, fetch churn data, or assess data quality for GA4 or Churn predictions.
+description: Run and validate the Stop & Save weekly BigQuery preparation workflow, including the weekly pChurn source, daily GA platform catch-up, and ordered P1/P2/feature materializations. Use for full weekly refreshes or individual preparation stages.
 ---
 
-# Prepare Data Skill
+# Prepare Stop & Save Data
 
-This skill orchestrates the data extraction and quality assessment pipeline for the pChurn Stop & Save project. The pipeline executes parameterized BigQuery SQL scripts, persists the results in BigQuery partitions, and optionally downloads local copies for quality assessment.
+Run preparation from the repository root through `src/run_prepare_data.py`. This one entry point applies environment mapping, production safeguards, stage validation, and execution order to both partitioned and self-materializing queries.
 
-## Workflow
+## Full weekly workflow
 
-When asked to prepare data, run the data pipeline, or assess data quality, follow these steps:
+The workflow runs these stages in order and stops after any failure or assessment alert:
 
-### 1. Identify the Pipeline Configuration
-Determine which SQL file and configuration to use based on the user's request:
-- **Churn Predictions:** Use `stop_save_source.sql`. It requires `sunday` date-mode and data assessment.
-- **Online Cancel (GA4):** Use `raw_online_cancel.sql`. It requires `exact` date-mode and `--skip-download`.
+1. Write the weekly Sunday partition of `stop_save_test_Bart`.
+2. Catch up daily `ss_test_ga4_platform` partitions through that Sunday.
+3. Run `ss_test_result_P1_gcp_events.sql`.
+4. Run `ss_test_result_P2_gcp_sourced.sql`.
+5. Run `ss_test_result_P2_gcp_sourced_add_feas.sql`.
 
-### 2. Execute the Data Pipeline
-Execute the orchestrator using `uv run python src/run_pipeline.py`. 
+Run it in staging:
 
-**Parameters (Grouped by Function):**
+```bash
+uv run python src/run_prepare_data.py --run-date YYYY-MM-DD
+```
 
-*Core Source & Destination:*
-- `--sql-file`: Path to the SQL file. Default: `src/sql/stop_save_source.sql`.
-- `--run-date`: The target date (YYYY-MM-DD). Default: Today.
-- `--table`: Target table name. Default: `stop_save_test_Bart`.
-- `--dataset`: Target dataset name. Default: `test_activation_zone`.
+`--run-date` may be any date in the target week and resolves to that week's Sunday. `--ga-end-date` defaults to the same Sunday. If the GA table has no baseline, provide an inclusive `--ga-start-date`; never use a date before `2025-12-29`.
 
-*Pipeline Behavior:*
-- `--date-mode`: `sunday` (calculates previous Sunday) or `exact` (uses run-date). Default: `sunday`.
-- `--partition-field`: The field used for BQ partitioning. Default: `inference_date`.
-- `--guardrail-table`: Table to check for availability. Pass `""` to bypass.
-- `--catch-up`: Automatically fill missing partitions between the last entry in BQ and the `--run-date`.
+The runner checks the intervention input, source partitions, 90-day GA coverage, nonempty outputs, requested-week rows, and filtered versus unfiltered counts. Staging runs also report row-count and schema differences from production. Do not continue manually after a failure.
 
-*Output & Assessment:*
-- `--skip-download`: Pass this flag to skip local download and bypass data assessment.
-- `--local-output`: Path for local cache. Default: `data/stop_save_source_YYYYMMDD_HHMMSS.parquet`.
+## Environments and authorization
 
-### 3. Monitor for Guardrails & Alerts (CRITICAL)
-1. **Missing Data:** If the script fails because data is not available in the `guardrail-table`, report this to the user immediately.
-2. **Data Anomalies:** If the pipeline outputs a `⚠️ ALERT` (e.g., >10% deviation in row counts or nulls), you **MUST HALT** immediately. Present the alert to the user and wait for approval before any further analysis.
+The default destination is `gannett-datascience.stop_save_refactor_staging`. Use it for implementation tests and result comparisons.
 
-## Execution Examples
+Production writes require explicit user approval and both flags:
 
-**Example A: Standard Churn Pipeline**
-`uv run python src/run_pipeline.py --run-date 2026-04-01 --table churn_results`
+```bash
+uv run python src/run_prepare_data.py \
+  --run-date YYYY-MM-DD \
+  --environment production \
+  --confirm-production
+```
 
-**Example B: GA4 Online Cancel Pipeline**
-`uv run python src/run_pipeline.py --sql-file src/sql/raw_online_cancel.sql --run-date 2026-05-02 --table ss_test_online_cancel_raw --partition-field event_date --date-mode exact --guardrail-table "" --skip-download`
+Never infer production approval from a request to inspect, test, validate, or prepare a plan. Report staging results and request explicit production direction.
 
-**Example C: Catch-up Pipeline (Fill missing daily GA4 data)**
-`uv run python src/run_pipeline.py --sql-file src/sql/raw_online_cancel.sql --run-date 2026-05-02 --table ss_test_online_cancel_raw --partition-field event_date --date-mode exact --guardrail-table "" --skip-download --catch-up`
+## Individual stages
 
-## Notes
-- Do NOT run SQL directly via `bq` CLI; always use the Python orchestrator.
-- Local parquet files are timestamped to prevent accidental overwrites.
+Use `--stage source`, `--stage ga`, `--stage p1`, `--stage p2`, or `--stage features`:
+
+```bash
+uv run python src/run_prepare_data.py \
+  --run-date YYYY-MM-DD \
+  --stage source
+```
+
+For GA catch-up, set `--ga-end-date` only when it should extend beyond the resolved Sunday:
+
+```bash
+uv run python src/run_prepare_data.py \
+  --run-date YYYY-MM-DD \
+  --stage ga \
+  --ga-end-date YYYY-MM-DD
+```
+
+GA catch-up fills dates after the current maximum without rewriting a current final partition. It does not repair older internal gaps. An individual stage assumes its upstream tables are ready. Production stage runs still require `--environment production --confirm-production` after explicit approval.
+
+## Failure rules
+
+- Missing guardrail data, a missing intervention week, an unavailable GA baseline, a query error, or a validation failure stops the workflow.
+- Treat a `⚠️ ALERT` from assessment as a failure and present it before downstream work.
+- Require the success summary and stage validations; a completed shell command alone is insufficient.
+- Do not execute the SQL files directly with the `bq` CLI or helper modules. The consolidated runner provides the required mapping and safeguards.

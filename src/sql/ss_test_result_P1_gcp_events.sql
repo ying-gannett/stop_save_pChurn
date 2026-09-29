@@ -1,8 +1,9 @@
 -- todo: Repeat restarts vs winbacks = 180 days vs 90 days
+-- Destination tokens are rendered by src/run_prepare_data.py.
 
 -- Part 1. Sourcing from GCP consumer_events
   declare launch_date Date default '2026-04-03';  -- first batch of pricing email in the stop-save test was sent
-  create or replace table `gannett-datascience.test_results_zone.ss_test_result_v3-0_gcp_event`   -- 133,227 up to 08-19-2026
+  create or replace table `{{p1_event_table}}`   -- 133,227 up to 08-19-2026
   as
   with src as (   -- raw events
     select *

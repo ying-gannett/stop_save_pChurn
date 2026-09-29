@@ -1,47 +1,58 @@
 import datetime
 import os
+import re
+from pathlib import Path
+from typing import Mapping, Optional
+
+import pandas as pd
+from google.api_core.exceptions import NotFound
 from google.cloud import bigquery
-from typing import Optional, List
 
-def calculate_target_date(run_date_str: str, mode: str) -> datetime.date:
-    """Calculates the target date based on the mode ('exact' or 'sunday')."""
+try:
+    from .workflow_config import WorkflowTables, intervention_inference_date_sql
+except ImportError:  # Supports direct execution of the workflow runner.
+    from workflow_config import WorkflowTables, intervention_inference_date_sql
+
+_TABLE_TOKEN = re.compile(r"\{\{([a-z][a-z0-9_]*)\}\}")
+
+
+def resolve_sunday(run_date_str: str) -> datetime.date:
+    """Resolve any date to the Sunday that starts its BigQuery reporting week."""
     run_date = datetime.date.fromisoformat(run_date_str)
-    if mode.lower() == 'exact':
-        return run_date
-    elif mode.lower() == 'sunday':
-        idx = (run_date.weekday() + 1) % 7
-        return run_date - datetime.timedelta(days=idx)
-    else:
-        raise ValueError(f"Unknown date-mode: {mode}. Use 'exact' or 'sunday'.")
+    days_since_sunday = (run_date.weekday() + 1) % 7
+    return run_date - datetime.timedelta(days=days_since_sunday)
 
-def get_latest_partition_date(client: bigquery.Client, table_id: str, partition_field: str) -> Optional[datetime.date]:
+
+def get_latest_partition_date(
+    client: bigquery.Client, table_id: str, partition_field: str
+) -> Optional[datetime.date]:
     """Queries BigQuery to find the maximum partition date in the target table."""
     query = f"SELECT MAX({partition_field}) as max_date FROM `{table_id}`"
     try:
         query_job = client.query(query)
         results = list(query_job.result())
         return results[0].max_date
-    except Exception:
-        # Returns None if table doesn't exist or column is missing
+    except NotFound:
+        # A missing table has no baseline. Authentication and SQL errors must
+        # still propagate so catch-up cannot silently use the wrong behavior.
         return None
 
-def get_date_range(start_date: datetime.date, end_date: datetime.date, mode: str) -> List[datetime.date]:
-    """Generates a list of dates between start (exclusive) and end (inclusive)."""
+
+def get_daily_dates_after(
+    start_date: datetime.date,
+    end_date: datetime.date,
+) -> list[datetime.date]:
+    """Return daily dates between start (exclusive) and end (inclusive)."""
     dates = []
-    current = start_date
-    
-    step = datetime.timedelta(days=1)
-    if mode.lower() == 'sunday':
-        step = datetime.timedelta(days=7)
-        
-    current += step
+    current = start_date + datetime.timedelta(days=1)
     while current <= end_date:
         dates.append(current)
-        current += step
+        current += datetime.timedelta(days=1)
     return dates
 
+
 def check_guardrail(client: bigquery.Client, target_date_str: str, guardrail_table: str):
-    """Checks if the target date exists in the guardrail table. Skips if guardrail_table is empty."""
+    """Check source availability, unless no guardrail table was configured."""
     if not guardrail_table:
         print("No guardrail table specified. Skipping availability check.")
         return
@@ -55,25 +66,34 @@ def check_guardrail(client: bigquery.Client, target_date_str: str, guardrail_tab
     try:
         guardrail_job = client.query(guardrail_query)
         res = list(guardrail_job.result())
-        cnt = res[0]['cnt']
-        
+        cnt = res[0]["cnt"]
+
         if cnt == 0:
-            raise RuntimeError(f"❌ Error: Data for {target_date_str} is not available in {guardrail_table} yet.")
+            raise RuntimeError(
+                f"❌ Error: Data for {target_date_str} is not available in {guardrail_table} yet."
+            )
         else:
             print(f"✅ Data available! Found {cnt} rows for {target_date_str}.")
-    except Exception as e:
-        raise RuntimeError(f"Failed during guardrail check: {e}")
+    except Exception as exc:
+        raise RuntimeError(f"Failed during guardrail check: {exc}") from exc
 
-def execute_bq_query(client: bigquery.Client, sql_file: str, target_table_id: str, partition_field: Optional[str], target_date_str: str):
-    """Reads SQL, applies partition decorator if partition_field is provided, and executes WRITE_TRUNCATE job."""
+
+def execute_bq_query(
+    client: bigquery.Client,
+    sql_file: str,
+    target_table_id: str,
+    partition_field: Optional[str],
+    target_date_str: str,
+):
+    """Execute a SELECT query into a table or one date partition."""
     if not os.path.exists(sql_file):
         raise FileNotFoundError(f"❌ Error: SQL file {sql_file} not found.")
-        
-    with open(sql_file, 'r') as f:
+
+    with open(sql_file, "r") as f:
         sql_template = f.read()
-        
+
     sql_query = sql_template.format(run_date=target_date_str)
-    
+
     if partition_field:
         # Format partition decorator: YYYYMMDD
         partition_decorator = target_date_str.replace("-", "")
@@ -83,15 +103,15 @@ def execute_bq_query(client: bigquery.Client, sql_file: str, target_table_id: st
             write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
             time_partitioning=bigquery.TimePartitioning(
                 type_=bigquery.TimePartitioningType.DAY,
-                field=partition_field
-            )
+                field=partition_field,
+            ),
         )
         print(f"Executing query and saving to BigQuery partition `{destination}`...")
     else:
         destination = target_table_id
         job_config = bigquery.QueryJobConfig(
             destination=destination,
-            write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE
+            write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
         )
         print(f"Executing query and saving to BigQuery table `{destination}`...")
 
@@ -99,23 +119,34 @@ def execute_bq_query(client: bigquery.Client, sql_file: str, target_table_id: st
         query_job = client.query(sql_query, job_config=job_config)
         query_job.result()
         print("✅ Table populated successfully in BigQuery.")
-    except Exception as e:
-        raise RuntimeError(f"Failed executing BigQuery SQL: {e}")
+    except Exception as exc:
+        raise RuntimeError(f"Failed executing BigQuery SQL: {exc}") from exc
 
-def download_local_cache(client: bigquery.Client, target_table_id: str, partition_field: Optional[str], target_date_str: str, local_output: Optional[str]) -> str:
-    """Downloads the target partition data to a local file. If partition_field is None, downloads the entire table."""
+
+def download_local_cache(
+    client: bigquery.Client,
+    target_table_id: str,
+    partition_field: Optional[str],
+    target_date_str: str,
+    local_output: Optional[str],
+) -> tuple[str, pd.DataFrame]:
+    """Download the target partition, or the whole table when unpartitioned."""
     if local_output is None:
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         local_output = f"data/stop_save_source_{timestamp}.parquet"
-        
-    os.makedirs(os.path.dirname(local_output), exist_ok=True)
+
+    output_directory = os.path.dirname(local_output)
+    if output_directory:
+        os.makedirs(output_directory, exist_ok=True)
     print(f"Downloading data locally to {local_output}...")
-    
+
     if partition_field:
-        download_query = f"SELECT * FROM `{target_table_id}` WHERE {partition_field} = DATE('{target_date_str}')"
+        download_query = (
+            f"SELECT * FROM `{target_table_id}` WHERE {partition_field} = DATE('{target_date_str}')"
+        )
     else:
         download_query = f"SELECT * FROM `{target_table_id}`"
-    
+
     try:
         df = client.query(download_query).to_dataframe()
         if local_output.endswith(".parquet"):
@@ -123,28 +154,74 @@ def download_local_cache(client: bigquery.Client, target_table_id: str, partitio
         else:
             df.to_csv(local_output, index=False)
         print(f"✅ Successfully downloaded {len(df)} rows to local cache.")
-    except Exception as e:
-        raise RuntimeError(f"Failed downloading local copy: {e}")
-        
-    return local_output
+    except Exception as exc:
+        raise RuntimeError(f"Failed downloading local copy: {exc}") from exc
 
-def run_extraction(client: bigquery.Client, target_date: datetime.date, project: str, dataset: str, table: str, partition_field: Optional[str], sql_file: str, local_output: Optional[str], guardrail_table: str, skip_download: bool) -> tuple[Optional[str], str, str]:
-    """
-    Core extraction logic for a single date.
-    Returns (local_output_path, target_date_str, target_table_id).
-    """
-    target_table_id = f"{project}.{dataset}.{table}"
+    return local_output, df
+
+
+def run_partition_query(
+    client: bigquery.Client,
+    target_date: datetime.date,
+    target_table_id: str,
+    partition_field: Optional[str],
+    sql_file: str,
+    guardrail_table: str,
+    download: bool = False,
+    local_output: Optional[str] = None,
+) -> tuple[Optional[str], Optional[pd.DataFrame]]:
+    """Populate one partition and optionally return the downloaded cache and DataFrame."""
     target_date_str = target_date.isoformat()
-    
-    # 1. Check Guardrail
+
     check_guardrail(client, target_date_str, guardrail_table)
-    
-    # 2. Execute Query
     execute_bq_query(client, sql_file, target_table_id, partition_field, target_date_str)
-    
-    # 3. Download Cache (Conditional)
-    downloaded_path = None
-    if not skip_download:
-        downloaded_path = download_local_cache(client, target_table_id, partition_field, target_date_str, local_output)
-        
-    return downloaded_path, target_date_str, target_table_id
+
+    if download:
+        return download_local_cache(
+            client,
+            target_table_id,
+            partition_field,
+            target_date_str,
+            local_output,
+        )
+    return None, None
+
+
+def render_sql_template(sql_template: str, values: Mapping[str, str]) -> str:
+    """Replace explicit ``{{name}}`` tokens and reject unknown tokens."""
+    tokens = set(_TABLE_TOKEN.findall(sql_template))
+    unknown = tokens.difference(values)
+    if unknown:
+        raise ValueError(f"Unknown SQL template token(s): {', '.join(sorted(unknown))}")
+
+    rendered = sql_template
+    for token in tokens:
+        rendered = rendered.replace(f"{{{{{token}}}}}", values[token])
+
+    unresolved = set(_TABLE_TOKEN.findall(rendered))
+    if unresolved:
+        raise ValueError(f"Unresolved SQL template token(s): {', '.join(sorted(unresolved))}")
+    return rendered
+
+
+def load_and_render_sql(sql_file: str | Path, tables: WorkflowTables) -> str:
+    """Load a workflow SQL file and resolve its environment-specific tokens."""
+    path = Path(sql_file)
+    if not path.is_file():
+        raise FileNotFoundError(f"SQL file not found: {path}")
+    values = tables.template_values()
+    values["intervention_inference_date_sql"] = intervention_inference_date_sql()
+    return render_sql_template(path.read_text(), values)
+
+
+def execute_sql_script(
+    client: bigquery.Client,
+    sql_file: str | Path,
+    tables: WorkflowTables,
+) -> None:
+    """Execute SQL that creates its own destination table or tables."""
+    rendered_sql = load_and_render_sql(sql_file, tables)
+    print(f"Executing self-materializing BigQuery script `{sql_file}`...")
+    query_job = client.query(rendered_sql)
+    query_job.result()
+    print(f"✅ Completed `{sql_file}` (job {query_job.job_id}).")

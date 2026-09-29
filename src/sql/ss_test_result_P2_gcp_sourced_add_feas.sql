@@ -1,8 +1,8 @@
-
-create or replace table `gannett-datascience.test_results_zone.ss_test_result_usage_analysis`
+-- Workflow table tokens are rendered by src/run_prepare_data.py.
+create or replace table `{{usage_analysis_table}}`
 as
 with src as (
-  select * from `gannett-datascience.test_results_zone.ss_test_result_p1_p2_combined`
+  select * from `{{p2_combined_table}}`
 ),
 kc as (   -- id_sub | anony_id_1,2,3 mappings
   select distinct 
@@ -63,7 +63,7 @@ ga as (   -- rank 1 platform in the past 90d
       g.platform as favor_platform,
       sum(session_cnt)/90 as freq   -- total sessions/ 90 days
     from unpivoted
-    join `gannett-datascience.test_activation_zone.ss_test_ga4_platform` g on
+    join `{{ga_platform_table}}` g on
       g.anonymous_id = unpivoted.anonymous_id
       AND g.site_code = unpivoted.website_id
       and g.event_date between date_sub(unpivoted.inference_date, INTERVAL 90 day) and unpivoted.inference_date
@@ -78,7 +78,7 @@ select
   rfv.modelscore, rfv.rfv_bin,
   ga.favor_platforms, ga.session_per_day_in_90d
 from src
-join `gannett-datascience.test_activation_zone.stop_save_selected_80_mkts_with_subid` m on
+join `{{selected_markets_table}}` m on
   src.id_subscrip = m.id_subscrip
   and src.inference_date between m.effective_date and m.end_date
 left join rfv on 
@@ -87,8 +87,5 @@ left join rfv on
 left join ga on
   src.id_subscrip = ga.id_subscrip
   and src.inference_date = ga.inference_date
-
-
-
 
 

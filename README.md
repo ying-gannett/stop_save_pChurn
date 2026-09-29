@@ -45,7 +45,8 @@ stop_save_pChurn/
 │   └── sql/                        # BQ scipts
 │   ├── data_processing.py          # SQL execution
 │   ├── data_assessment.py          # Data quality assessment and logging
-│   └── run_pipeline.py             # Python orchestrator for SQL execution, assessment and logging
+│   ├── run_prepare_data.py         # Ordered, staging-first weekly workflow
+│   └── workflow_config.py          # Staging and production table mappings
 ├── pyproject.toml            # Project configuration and dependencies
 ├── prepare-data.skill        # Packaged agent skill for distribution
 └── README.md                 # Project documentation
@@ -54,55 +55,42 @@ stop_save_pChurn/
 ## 🏃 Usage
 
 ### Data Preparation
-The data pipeline is orchestrated by an AI agent skill or can be run directly:
+The preparation workflow runs five stages in order:
 
-1.  **Via Agent**: 
-    - **Install Skill**: If not already installed, run:
-      ```bash
-      gemini skills install prepare-data.skill --scope workspace
-      ```
-    - **Reload**: Type `/skills reload` in your Gemini CLI session to activate the skill.
-    - **Run**: You can fire the skill using natural language prompts.
-      - *Example 1 (Churn):* "Prepare the stop save source data for 2026-03-31, 04-07, 04-14, and 04-21. The target BQ table is gannett-datascience.test_activation_zone.ss_test_source."
-      - *Example 2 (GA4):* "Run the online cancel GA4 data pipeline for days between 2026-04-03 and 2026-04-09. Date mode is "exact". The target BQ table is gannett-datascience.test_activation_zone.ss_test_online_cancel_raw, partitioned by event_date. Skip the local download."
-      - *Example 3 (GA4 Platform):* "Run the raw_ga_platorm data pipeline for days between 2025-12-29 and 2026-01-04. Date mode is "exact". The target BQ table is gannett-datascience.test_activation_zone.ss_test_ga4_platform, partitioned by event_date. Skip the local download."
-2.  **Directly**: 
-    ```bash
-    python src/data_processing.py
-    ```
-    The pipeline executes SQL scripts against BigQuery, persists results in BQ tables, and saves local copies to the `data/` directory.
+1. Write the weekly Sunday partition from `stop_save_source.sql`.
+2. Catch up daily GA platform partitions from `raw_ga_platform.sql`.
+3. Refresh P1 GCP event results.
+4. Refresh P2 unfiltered and filtered results.
+5. Refresh the usage-analysis feature table.
 
-### Project specific workflow
-1. Weekly Tuesday (Churn Predictions): 
-    a. **Via Agent**: 
-        "Execute stop_save_source.sql for <this week>. The target BQ table is <gannett-datascience.test_activation_zone.stop_save_test_Bart>, partitioned by inference_date."
-    b. **Directly**:
-        "uv run python src/run_pipeline.py --run-date <2026-04-01> --partition-field inference_date"
-2. Weekly Tuesday (Online Cancell Data: GA4 catch-up run for the past week): 
-    a. **Via Agent**:
-        "Execute raw_online_cancel.sql for <days until last Sunday>. Date mode is "exact". The target BQ table is <gannett-datascience.test_activation_zone.ss_test_online_cancel_raw>, partitioned by event_date. Skip the local download."
-    b. **Directly**:
-        "uv run python src/run_pipeline.py --sql-file src/sql/raw_online_cancel.sql --run-date <2026-05-02> --table ss_test_online_cancel_raw --partition-field event_date --date-mode exact --guardrail-table "" --skip-download --catch-up"
-3. Weekly Tuesday (GA4 platform Data: GA4 catch-up run for the past week): 
-    a. **Via Agent**:
-        "Execute raw_ga_platform.sql for <days until last Sunday>. Date mode is "exact". The target BQ table is <gannett-datascience.test_activation_zone.ss_test_ga4_platform>, partitioned by event_date. Skip the local download."
-    b. **Directly**:
-        "uv run python src/run_pipeline.py --sql-file src/sql/raw_ga_platform.sql --run-date <2026-05-02> --table ss_test_ga4_platform --partition-field event_date --date-mode exact --guardrail-table "" --skip-download --catch-up"
-4. Weekly Friday (**Intervention Data: Out of the workflow**): 
-    Take Step 1 result --> <gannett-datascience.test_results_zone.stop_save_test_applied_Bart>
-5. Weekly Tuesday (Call Center Cancell Data: SKPI):
-    Load SKPI data from spreadsheet into GCP
-        "LOAD DATA INTO `gannett-datascience.test_activation_zone.ss_call_center`
-        FROM FILES (
-        format = 'CSV',
-        uris = ['gs://gannett-data-science/Ying/ss_test_callcenter_data/ss_callcenter-0501-to-0518.csv']
-        )
-        "
-6. Weekly Monday (Step 2 + 3 + 4): 
-    a. **Via Agent**:
-        "Execute monitor_performance.sql. The target BQ table is <gannett-datascience.test_results_zone.ss_test_result_v2>."
-    b. **Directly**:
-        "uv run python src/run_pipeline.py --sql-file src/sql/monitor_performance.sql --dataset test_results_zone --table ss_test_result_v2"
+The full runner defaults to the isolated
+`gannett-datascience.stop_save_refactor_staging` dataset:
+
+```bash
+uv run python src/run_prepare_data.py --run-date 2026-09-30
+```
+
+The run date may be any day in the target week and resolves to that week's Sunday.
+Use `--ga-end-date` when GA should be caught up beyond that Sunday. The runner validates
+the intervention input, source partitions, GA coverage, row counts, and requested-week
+outputs, and stops immediately after a failed stage. A staging run also reports row-count
+and schema differences from production so intentional query changes can be reviewed.
+
+Production execution is opt-in and should follow a successful staging comparison:
+
+```bash
+uv run python src/run_prepare_data.py \
+  --run-date 2026-09-30 \
+  --environment production \
+  --confirm-production
+```
+
+Run one stage through the same guarded entry point with `--stage source`, `--stage ga`,
+`--stage p1`, `--stage p2`, or `--stage features`. Individual stages assume their upstream
+tables are ready. All preparation commands use `src/run_prepare_data.py`.
+
+The packaged agent instructions are in `prepare-data.skill`. After installing or updating
+the package, reload skills before invoking the workflow through an agent.
 
 ## 📊 Analysis Overview
 

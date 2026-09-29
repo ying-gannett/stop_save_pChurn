@@ -1,4 +1,5 @@
 -- Experiment config result: test_results_zone.stop_save_test_applied_Bart
+-- Workflow table tokens are rendered by src/run_prepare_data.py.
   -- balanced by site and price level, 
   -- quarterly/annuals are excluded
   -- Two-Offer Cohort: modeltype=MIDPOINT
@@ -7,7 +8,7 @@
     -- Treatment: MIDPOINT:CONTRO:TIERED=1:1:1
     -- TIERED: RISK1-5 maintain pchurn ratio.
 
-create or replace table `gannett-datascience.test_results_zone.ss_test_result_p1_p2_combined_unfiltered`
+create or replace table `{{p2_unfiltered_table}}`
 as
 with raw as (  -- cleaned ss_test_applied
   select 
@@ -27,15 +28,9 @@ with raw as (  -- cleaned ss_test_applied
         when grouptype='CONTROL' then 'Control'
         else 'Tiered'
       end as Treatment,
-      case 
-        when filedate = '2026-04-08' then date('2026-03-29')  -- filedate 4/8 ~ inference_date 3/29
-        when filedate = '2026-04-09' then date('2026-04-05')  -- filedate 4/9 ~ inference_date 4/5
-        when filedate = '2026-08-31' then date('2026-08-23')  -- filedate 8/31 ~ inference_date 8/23
-        when filedate = '2026-09-07' then date('2026-08-30')  -- filedate 9/7 ~ inference_date 8/30
-        else date_trunc(filedate, week(Sunday))               -- once per week for the rest weeks
-      end as inference_date,
+      {{intervention_inference_date_sql}} as inference_date,
       -- account, term, length, filedate, ebill, paymentmethod, product, reason, brandid, marketid, grouptype,
-    FROM `gannett-datascience.test_results_zone.stop_save_test_applied_Bart`
+    FROM `{{intervention_table}}`
   )
 ),
 lk as (  
@@ -60,7 +55,7 @@ ss_applied as (   -- link billing_account and id_subscrip
       p.id_subscrip,
       raw.*
     from raw 
-    left join `gannett-datascience.test_activation_zone.stop_save_test_Bart` p on
+    left join `{{stop_save_source_table}}` p on
     raw.billing_account = lower(trim(p.billing_account))   
     and raw.inference_date = p.inference_date
     where raw.cohort = 'Three-Offer Cohort' 
@@ -77,7 +72,7 @@ b as (
     ss_applied.id_subscrip as id_subscrip_manual, 
     g.* except(zuora_billing_account, pricing_notice_date, pricing_effective_date, pre_pricing_monthly_price, target_monthly_price) 
   from ss_applied
-  left join `gannett-datascience.test_results_zone.ss_test_result_v3-0_gcp_event` g on
+  left join `{{p1_event_table}}` g on
     ss_applied.billing_account = g.zuora_billing_account
 ),
 p1 as (
@@ -88,7 +83,7 @@ p1 as (
     concat(b.Treatment, ' - ', y.risk_tier) as treatment_plus_tier,
     cast(REGEXP_EXTRACT(b.pricegroup, r'(\d+)') as int64) as pricegroup_order
   from b
-  left join `gannett-datascience.test_activation_zone.stop_save_test_Bart` y on
+  left join `{{stop_save_source_table}}` y on
     lower(trim(y.billing_account)) = b.billing_account
     and y.inference_date = b.inference_date
   left join `gannett-enterprise-data.models_sz.source_pchurn_staging` zf on
@@ -175,9 +170,9 @@ from (
 );
 
 
-create or replace table `gannett-datascience.test_results_zone.ss_test_result_p1_p2_combined`
+create or replace table `{{p2_combined_table}}`
 as
-select * from `gannett-datascience.test_results_zone.ss_test_result_p1_p2_combined_unfiltered`
+select * from `{{p2_unfiltered_table}}`
 where paid_target = 0   -- exclude 60 users who contacted but pay target price 
   and conflict_tag = 'No'  -- exclude 1964(Y/N = 1964/101834 | 2%) vol perm without contact associated(EDE-14782 closed and can't explain) or invol perm with contact associated. 
   and conflict_tag is not null  -- excldue 28 priced users not covered in consumer_events table
