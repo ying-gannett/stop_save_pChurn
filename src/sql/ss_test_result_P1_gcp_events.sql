@@ -1,4 +1,3 @@
--- Check data issue: why 15.5% created perm without contact after pricing? -- EDE-14782
 -- todo: Repeat restarts vs winbacks = 180 days vs 90 days
 
 -- Part 1. Sourcing from GCP consumer_events
@@ -46,7 +45,6 @@
     select distinct
       event_timestamp as contact_ol_time,
       cast(json_value(event_attributes, '$.id_subscrip') as int64) as id_subscrip,
-        -- json_value(event_attributes, '$.anon_id_d050') as anon_id, json_value(event_attributes, '$.website_id_d031') as website_id,
       "OL Cancel" as contact_ol,
     FROM src
     where event_name='snap_cancel_subscription_click_after_reason_selection'
@@ -67,12 +65,6 @@
         on lower(trim(json_value(src.event_attributes, '$.coe_cnt_code'))) = lower(trim(mdm.stop_code)) 
       WHERE src.event_name = "stop_permanent" 
       and not REGEXP_CONTAINS(mdm.stop_descriptions, r'Chargeback|Dup')
-        -- and mdm.stop_code not in (
-        --   select distinct stop_code,
-        --   from `gannett-enterprise-data.consumers_rfz.subscriptions_trans_start_stop`
-        --   where is_perm_stop = 1
-        --   and REGEXP_CONTAINS(stop_reason, r'Chargeback|Dup Start')
-        -- )
     )
     QUALIFY 
     COUNT(DISTINCT perm_stop_sys_date) OVER(PARTITION BY id_subscrip) = 1
@@ -97,12 +89,12 @@
       ps.id_subscrip as perm_stop_subid, 
       count(distinct ns.id_subscrip) over (partition by ps.id_subscrip) as new_subid_counts,
       if(sum(ns.is_winback) over(partition by ps.id_subscrip)>0, 'repeat restart via winback', 'repeat restart via intro') as ever_winback_rejoin,
-      ARRAY_AGG(ns.id_subscrip) OVER (PARTITION BY ps.id_subscrip ORDER BY ns.event_date
+      ARRAY_AGG(
+        STRUCT(ns.id_subscrip, ns.event_date)
+      ) OVER (PARTITION BY ps.id_subscrip
+        ORDER BY ns.event_date asc
         rows between unbounded preceding and unbounded following
-      ) AS new_start_subid_arr,
-      ARRAY_AGG(ns.event_date) OVER ( PARTITION BY ps.id_subscrip ORDER BY ns.event_date
-        rows between unbounded preceding and unbounded following
-      ) AS new_start_date_arr,   
+      )AS restart_history
     from vol_perm ps 
     join new_start ns on
       ps.consumer_id = ns.consumer_id
@@ -132,6 +124,7 @@
         when s.is_vol_perm is true then 1
         else 2
       end as churn_code,
+      r.new_subid_counts, r.restart_history,
       if(r.new_subid_counts is null, 'No Rejoin', 'Rejoin') as has_rejoin,
       coalesce(r.ever_winback_rejoin, 'No Rejoin') as ever_winback_rejoin
     from priced t
@@ -173,7 +166,8 @@
       if(sum(c.olContact_90d_of_notice) over(partition by c.id_subscrip)>0, 1, 0) as olContact_90d_of_notice,
       c.perm_stop_sys_date, c.perm_stop_date, 
       c.is_vol_perm, c.stop_code, c.perm_90d_of_notice,
-      c.churn_code,
+      if(c.contact_channels='No Action yet' and c.churn_code=0, null, c.churn_code) as churn_code,
+      c.new_subid_counts, c.restart_history,
       c.has_rejoin,
       c.ever_winback_rejoin,
       case
@@ -207,6 +201,7 @@
       perm_90d_of_notice,
       perm_stop_sys_date, perm_stop_date, is_vol_perm, stop_code,
       churn_code,
+      new_subid_counts, restart_history,
       has_rejoin,
       ever_winback_rejoin,
       conflict_tag
@@ -225,6 +220,3 @@
     end as Repeat_Restarts,
   from feature_2
   ;
-
-
-
