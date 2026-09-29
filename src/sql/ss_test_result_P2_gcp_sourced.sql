@@ -1,5 +1,3 @@
-
-
 -- Experiment config result: test_results_zone.stop_save_test_applied_Bart
   -- balanced by site and price level, 
   -- quarterly/annuals are excluded
@@ -9,8 +7,7 @@
     -- Treatment: MIDPOINT:CONTRO:TIERED=1:1:1
     -- TIERED: RISK1-5 maintain pchurn ratio.
 
-create or replace table `gannett-datascience.test_results_zone.ss_test_result_p1_p2_combined`
--- create or replace table `gannett-datascience.test_results_zone.ss_test_result_p1_p2_combined_unfiltered`
+create or replace table `gannett-datascience.test_results_zone.ss_test_result_p1_p2_combined_unfiltered`
 as
 with raw as (  -- cleaned ss_test_applied
   select 
@@ -20,9 +17,9 @@ with raw as (  -- cleaned ss_test_applied
     SELECT distinct    
       lower(trim(subscription)) as billing_account, -- zuora_subscriptionid = billing_account
       pricegroup,
-      currentrate as start_price, 
-      newrate as step_up_price,
-      stopsave as stop_save_price,
+      cast(currentrate AS NUMERIC) as start_price, 
+      cast(newrate AS NUMERIC) as step_up_price,
+      cast(stopsave AS NUMERIC) as stop_save_price,
       date(effective) as pricing_effective_date,
       if(modeltype='PCHURN', 'Three-Offer Cohort', 'Two-Offer Cohort') as cohort, 
       case 
@@ -87,7 +84,7 @@ p1 as (
   select
     b.*,
     y.risk_tier as src_risk_tier,
-    zf.frequency, zf.breadth, zf.tenure, zf.tt_cost,
+    zf.frequency, zf.breadth, zf.tenure, cast(zf.tt_cost AS NUMERIC) as tt_cost,
     concat(b.Treatment, ' - ', y.risk_tier) as treatment_plus_tier,
     cast(REGEXP_EXTRACT(b.pricegroup, r'(\d+)') as int64) as pricegroup_order
   from b
@@ -124,52 +121,55 @@ pays as (
   and balance >= 0
 ),
 paid as (
-  select    -- 3027 paid users
+  select    
     billing_account, id_subscrip,
     sum(bill_amount_raw) as tt_paid_raw,
     sum(bill_amount_fix_gamer) as tt_paid_single_saved,
-    if(sum(lower_than_ss_tag)>0, 1, 0) as paid_lower_than_ss,   -- 255 + 1
-    if(sum(same_as_target_tag)>0, 1, 0) as paid_target,         -- 52 + 1
+    if(sum(lower_than_ss_tag)>0, 1, 0) as paid_lower_than_ss,  
+    if(sum(same_as_target_tag)>0, 1, 0) as paid_target,         
+    count(distinct id_payment_date) as cnt_payments,
+    if(count(distinct id_payment_date)>1, 1, 0) as at_least_paid_twice
   from (
     select
       p1.billing_account, p1.id_subscrip, p1.stop_save_price, p1.step_up_price,
       p.billing_amount as bill_amount_raw,
       if(p.billing_amount < p1.stop_save_price, p1.stop_save_price, p.billing_amount) as bill_amount_fix_gamer, -- as if lower than stop-save is banned
       if(p.billing_amount < p1.stop_save_price, 1, 0) as lower_than_ss_tag,
-        p1.email_date, p1.pricing_effective_date, p1.earlist_contact_date, p1.contact_groups, p.id_payment_date,
-      if(p.billing_amount = p1.step_up_price, 1, 0) as same_as_target_tag  -- if they contacted, why pay target
+      if(p.billing_amount = p1.step_up_price, 1, 0) as same_as_target_tag,  -- if they contacted, why pay target
+      p.id_payment_date, 
+      -- p1.email_date, p1.pricing_effective_date, p1.earlist_contact_date, p1.contact_channels, p1.contact_timing, p1.perm_stop_sys_date, p1.perm_stop_date, p1.churn_code, p1.conflict_tag
     from p1
     join pays p on
       p1.billing_account = p.billing_account
       and p1.id_subscrip = p.id_subscrip
       and p.id_payment_date > p1.earlist_contact_date   -- payments after contact
       and p.id_payment_date >= p1.pricing_effective_date   -- payments on or after effective date
-    where p1.churn_code = 0   -- exclude churned users's payments 
+    where p1.perm_stop_sys_date is null   -- retained users' payments 
+    or p.id_payment_date < p1.perm_stop_sys_date    --  churned users' payments before stop was created
   )  
   group by 1, 2 
 )
 select 
   * except(paid_lower_than_ss, Repeat_StopSaves),
   case 
-    when paid_lower_than_ss=1 and Repeat_StopSaves='not repeate stop-saves' 
-    then if(contains_substr(contact_groups, '|'), 'seek offer both channels', 'seek offer 2+')
-    else Repeat_StopSaves
+    when paid_lower_than_ss=0 and Repeat_StopSaves='not repeate stop-saves' then 'not repeate stop-saves'
+    when paid_lower_than_ss=0 and Repeat_StopSaves!='not repeate stop-saves' then concat(Repeat_StopSaves, ', not pay lower than ss')
+    when paid_lower_than_ss=1 and Repeat_StopSaves='not repeate stop-saves' then 
+      if(contains_substr(contact_groups, '|'), 'seek offer both channels, pay lower than ss', 'seek offer 2+, pay lower than ss')
+    else concat(Repeat_StopSaves, ', pay lower than ss')
   end as Repeat_StopSaves, 
+  if(email_date <= max(case when at_least_paid_twice=1 then email_date end) over(), 1, 0) as is_two_payment_cycle_ago
 from (
   select distinct
     p1.*, 
     coalesce(p.tt_paid_raw, 0) as revenue_raw,
     coalesce(p.tt_paid_single_saved, 0) as revenue_single_saved,
     coalesce(p.paid_lower_than_ss, 0) as paid_lower_than_ss,
-    coalesce(p.paid_target, 0) as paid_target
+    coalesce(p.paid_target, 0) as paid_target,
+    coalesce(p.cnt_payments, 0) as cnt_payments,
+    coalesce(p.at_least_paid_twice, 0) as at_least_paid_twice   
   from p1
   left join paid p on
     p1.billing_account = p.billing_account
     and p1.id_subscrip = p.id_subscrip   
-)
-where paid_target = 0   -- exclude 60 users who contacted but pay target price 
-  and conflict_tag = 'No'  -- exclude 1964(Y/N = 1964/101834 | 2%) vol perm without contact associated. EDE-14782 closed and can't explain. 
-  and churn_code is not null  -- 28 priced users not covered in consumer_events 
-
-
-
+);
