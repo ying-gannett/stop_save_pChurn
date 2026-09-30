@@ -1,10 +1,5 @@
 --------Explore restarts' revenue----------------
-  -- 1. Observed restarts with various rate plan terms: monthly, 3-months, 6-months, annual rate plan
-  -- 2. restarts could make up to 4 payments since restart until today
-  -- 3. id_payment_date aren't always perfect match rate mapping effective/end date
-  -- 4. when billing amount diff rate mapping, respect rate mapping
-  -- 5. try extract rate info from description
--- create or replace table `gannett-datascience.test_results_zone.dev_restarts_revenue` as
+
 with raw as (  -- cleaned ss_test_applied
   select 
     *, 
@@ -128,11 +123,6 @@ restarts as (
   where Repeat_Restarts != 'not repeat restarts'
 ),
 restart_pay as (
-  -- select distinct 
-  --   id_subscrip_origin, stop_save_price,
-  --   sum(bill_amount_raw) as tt_paid_raw,        
-  --   count(distinct id_payment_date) as cnt_payments,
-  -- from (
     select
       r.*,
       p.id_payment_date, 
@@ -142,8 +132,6 @@ restart_pay as (
       r.restart_idsub = p.id_subscrip
       and p.id_payment_date >= r.restart_date
     order by 1, 3
-  -- )  
-  -- group by 1, 2
 ),
 rate_mdm as (
   select r.id_subscrip, r.effective_date, r.end_date, m.monthly_price, m.description
@@ -161,24 +149,6 @@ restart_pay_rate as (
     r.id_subscrip = rs.restart_idsub
     and rs.id_payment_date between r.effective_date and r.end_date
 )
-SELECT -- distinct description, date_diff(id_payment_date, end_date, day) -- some payments are close to end_date
+SELECT
   *,
-  -- SAFE_CAST(REGEXP_EXTRACT(description, r'(\d+\.?\d*)') AS NUMERIC),
-  -- bill_amount_raw = SAFE_CAST(REGEXP_EXTRACT(description, r'(\d+\.?\d*)') AS NUMERIC)
 FROM restart_pay_rate
--- where bill_amount_raw != monthly_price
--- where bill_amount_raw != SAFE_CAST(REGEXP_EXTRACT(description, r'(\d+\.?\d*)') AS NUMERIC)
--- where description in (-- 'DIGITAL $1.00 FOR 12M TO $9.99 PM',
-  -- 'DIGITAL $1.00 FOR 6M TO $9.99 PM',
-  -- 'DIGITAL $119.00 YEARLY',
-  -- 'DIGITAL $149.00 YEARLY',
-  -- 'DIGITAL $199.00 YEARLY',
-  -- 'DIGITAL $4.99 PM FOR 3M TO $24.00 PM'
-  -- 'DIGITAL $59.00 YEARLY',
-  -- 'DIGITAL $89.00 YEARLY',
-  -- 'DIGITAL $99.00 YEARLY',
-  -- 'ZEPHR DIGITAL $149.00 YEARLY',
-  -- 'ZEPHR DIGITAL $199.00 YEARLY',
-  -- 'ZEPHR DIGITAL $99.00 YEARLY'
-  -- )
--- total 674 records, 501 subs restarted, 331 rejoin on a longer term rate plan
