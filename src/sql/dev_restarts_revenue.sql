@@ -1,10 +1,10 @@
 --------Explore restarts' revenue----------------
--- 1. Observed restarts with monthly, 3-months, 6-months, annual rate plan
--- 2. restarts could make update to 4 payments since restart until today
--- 3. id_payment_date aren't always perfect match rate mapping effective/end date
--- 4. when billing amount diff rate mapping, respect rate mapping
--- 5. try extract rate info from description
-
+  -- 1. Observed restarts with various rate plan terms: monthly, 3-months, 6-months, annual rate plan
+  -- 2. restarts could make up to 4 payments since restart until today
+  -- 3. id_payment_date aren't always perfect match rate mapping effective/end date
+  -- 4. when billing amount diff rate mapping, respect rate mapping
+  -- 5. try extract rate info from description
+-- create or replace table `gannett-datascience.test_results_zone.dev_restarts_revenue` as
 with raw as (  -- cleaned ss_test_applied
   select 
     *, 
@@ -119,6 +119,7 @@ pays as (
 ),
 restarts as (
   SELECT 
+    p1.Repeat_Restarts,
     p1.id_subscrip as id_subscrip_origin, -- perm_stop_sys_date, perm_stop_date, 
     p1.stop_save_price,
     history.id_subscrip as restart_idsub, history.event_date as restart_date
@@ -143,18 +144,41 @@ restart_pay as (
     order by 1, 3
   -- )  
   -- group by 1, 2
-)
-select 
-  rs.* except(conflict_tag, balance),
-  r.* except(id_subscrip)
-from (
+),
+rate_mdm as (
   select r.id_subscrip, r.effective_date, r.end_date, m.monthly_price, m.description
   from `gannett-enterprise-data.consumers_curated_zone_assets.subscriptions_rate_new` r
   join `gannett-enterprise-data.consumers_rfz.rate_mapping_combined` m on
   lower(trim(r.rate_key_system)) = lower(trim(m.rate_key_system))
   and r.rate_key_value = m.rate_key_value
-) r
-join restart_pay rs on
-  r.id_subscrip = rs.restart_idsub
-  and rs.id_payment_date between r.effective_date and r.end_date
-;
+),
+restart_pay_rate as (
+  select 
+    rs.*,
+    r.* except(id_subscrip)
+  from restart_pay rs 
+  join rate_mdm r on
+    r.id_subscrip = rs.restart_idsub
+    and rs.id_payment_date between r.effective_date and r.end_date
+)
+SELECT -- distinct description, date_diff(id_payment_date, end_date, day) -- some payments are close to end_date
+  *,
+  -- SAFE_CAST(REGEXP_EXTRACT(description, r'(\d+\.?\d*)') AS NUMERIC),
+  -- bill_amount_raw = SAFE_CAST(REGEXP_EXTRACT(description, r'(\d+\.?\d*)') AS NUMERIC)
+FROM restart_pay_rate
+-- where bill_amount_raw != monthly_price
+-- where bill_amount_raw != SAFE_CAST(REGEXP_EXTRACT(description, r'(\d+\.?\d*)') AS NUMERIC)
+-- where description in (-- 'DIGITAL $1.00 FOR 12M TO $9.99 PM',
+  -- 'DIGITAL $1.00 FOR 6M TO $9.99 PM',
+  -- 'DIGITAL $119.00 YEARLY',
+  -- 'DIGITAL $149.00 YEARLY',
+  -- 'DIGITAL $199.00 YEARLY',
+  -- 'DIGITAL $4.99 PM FOR 3M TO $24.00 PM'
+  -- 'DIGITAL $59.00 YEARLY',
+  -- 'DIGITAL $89.00 YEARLY',
+  -- 'DIGITAL $99.00 YEARLY',
+  -- 'ZEPHR DIGITAL $149.00 YEARLY',
+  -- 'ZEPHR DIGITAL $199.00 YEARLY',
+  -- 'ZEPHR DIGITAL $99.00 YEARLY'
+  -- )
+-- total 674 records, 501 subs restarted, 331 rejoin on a longer term rate plan
