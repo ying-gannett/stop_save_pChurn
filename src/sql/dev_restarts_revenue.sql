@@ -1,154 +1,268 @@
---------Explore restarts' revenue----------------
+-- Estimate the revenue opportunity from closing the repeat-restart loophole.
+--
+-- Primary comparison: earned pre-tax revenue over identical observation windows.
+-- Secondary comparison: unprorated pre-tax paid-invoice value over those windows.
+--
+-- This is a scenario analysis, not a causal estimate. The 100% fix scenario assumes
+-- every repeat restarter would have remained on the original monthly stop-save rate.
 
-with raw as (  -- cleaned ss_test_applied
+DECLARE as_of_date DATE DEFAULT DATE '2026-09-30';
+
+CREATE TEMP TABLE restart_revenue_work AS
+WITH horizon_definitions AS (
+  SELECT '30_days' AS horizon, 30 AS horizon_days
+  UNION ALL
+  SELECT '60_days', 60
+  UNION ALL
+  SELECT '90_days', 90
+  UNION ALL
+  SELECT 'to_date', CAST(NULL AS INT64)
+),
+origins AS (
+  SELECT
+    inference_date,
+    -- billing_account,
+    id_subscrip AS origin_id_subscrip,
+    website_id,
+    cohort,
+    Treatment,
+    -- src_risk_tier,
+    -- pricegroup,
+    -- contact_channels,
+    Repeat_Restarts,
+    stop_save_price,
+    -- perm_stop_sys_date,
+    -- perm_stop_date,
+    new_subid_counts,
+    restart_history,
+    perm_stop_sys_date AS analysis_start_date,
+    REPLACE(Repeat_Restarts, 'repeat restart via ', '') AS restart_type
+  FROM `gannett-datascience.stop_save_refactor_staging.ss_test_result_p1_p2_combined`
+  WHERE Repeat_Restarts IN (
+    'repeat restart via intro',
+    'repeat restart via winback'
+  )
+),
+restart_pairs AS (
+  SELECT
+    o.origin_id_subscrip,
+    history.id_subscrip AS restart_id_subscrip,
+    MIN(history.event_date) AS restart_date
+  FROM origins o
+  CROSS JOIN UNNEST(o.restart_history) AS history
+  WHERE history.id_subscrip IS NOT NULL
+  GROUP BY
+    o.origin_id_subscrip,
+    history.id_subscrip
+),
+origin_horizons AS (
+  SELECT
+    o.* EXCEPT (restart_history),
+    h.horizon,
+    h.horizon_days,
+    as_of_date,
+    CASE
+      WHEN h.horizon_days IS NULL THEN DATE_ADD(as_of_date, INTERVAL 1 DAY)
+      ELSE DATE_ADD(o.analysis_start_date, INTERVAL h.horizon_days DAY)
+    END AS window_end_exclusive,
+    CASE
+      WHEN h.horizon_days IS NULL
+        THEN DATE_DIFF(DATE_ADD(as_of_date, INTERVAL 1 DAY), o.analysis_start_date, DAY)
+      ELSE h.horizon_days
+    END AS exposure_days
+  FROM origins o
+  CROSS JOIN horizon_definitions h
+  WHERE o.analysis_start_date <= as_of_date
+    AND (
+      h.horizon_days IS NULL
+      OR DATE_DIFF(DATE_ADD(as_of_date, INTERVAL 1 DAY), o.analysis_start_date, DAY)
+        >= h.horizon_days
+    )
+),
+invoice_classified AS (
+  SELECT
+    p.id_invoice,
+    p.id_subscrip AS restart_id_subscrip,
+    r.restart_date,
+    p.id_payment_date,
+    p.amount_without_tax + p.balance AS paid_invoice_value,
+    p.service_start_date,
+    p.service_end_date,
+    CASE
+      WHEN p.id_payment_date IS NOT NULL AND p.id_decline_date IS NULL THEN 'Paid'
+      WHEN p.id_payment_date IS NOT NULL
+        AND p.id_decline_date IS NOT NULL
+        AND p.id_payment_date >= p.id_decline_date THEN 'Paid'
+      WHEN p.id_payment_date IS NULL
+        AND p.id_decline_date IS NULL
+        AND p.amount = 0
+        AND p.status = 'Posted' THEN 'Paid'
+      WHEN p.id_payment_date IS NULL AND p.id_decline_date IS NOT NULL THEN 'Not Paid'
+      WHEN p.id_payment_date IS NOT NULL
+        AND p.id_decline_date IS NOT NULL
+        AND p.id_payment_date < p.id_decline_date THEN 'Not Paid'
+      WHEN p.id_payment_date IS NULL AND p.id_decline_date IS NULL THEN 'Not Paid'
+      ELSE 'Other'
+    END AS payment_status
+  FROM (
+    SELECT DISTINCT restart_id_subscrip, restart_date
+    FROM restart_pairs
+  ) r
+  JOIN `gannett-enterprise-data.consumers_curated_zone_assets.subscriptions_invoice_payment` p
+    ON p.id_subscrip = r.restart_id_subscrip
+  where balance >= 0
+  and p.id_payment_date >= r.restart_date
+),
+paid_invoices AS (
   select 
-    *, 
-    date_add(inference_date, interval 5 day) as email_date 
+    *,
+    CAST(DATE_DIFF(service_end_exclusive, service_start, DAY) AS NUMERIC) as service_period
   from (
-    SELECT distinct    
-      lower(trim(subscription)) as billing_account, -- zuora_subscriptionid = billing_account
-      pricegroup,
-      cast(currentrate AS NUMERIC) as start_price, 
-      cast(newrate AS NUMERIC) as step_up_price,
-      cast(stopsave AS NUMERIC) as stop_save_price,
-      date(effective) as pricing_effective_date,
-      if(modeltype='PCHURN', 'Three-Offer Cohort', 'Two-Offer Cohort') as cohort, 
-      case 
-        when grouptype='MIDPOINT' then 'Midpoint'
-        when grouptype='CONTROL' then 'Control'
-        else 'Tiered'
-      end as Treatment,
-      case 
-        when filedate = '2026-04-08' then date('2026-03-29')  -- filedate 4/8 ~ inference_date 3/29
-        when filedate = '2026-04-09' then date('2026-04-05')  -- filedate 4/9 ~ inference_date 4/5
-        when filedate = '2026-08-31' then date('2026-08-23')  -- filedate 8/31 ~ inference_date 8/23
-        when filedate = '2026-09-07' then date('2026-08-30')  -- filedate 9/7 ~ inference_date 8/30
-        else date_trunc(filedate, week(Sunday))               -- once per week for the rest weeks
-      end as inference_date,
-      -- account, term, length, filedate, ebill, paymentmethod, product, reason, brandid, marketid, grouptype,
-    FROM `gannett-datascience.test_results_zone.stop_save_test_applied_Bart`
+    SELECT
+      *,
+      SAFE.PARSE_DATE('%Y%m%d', CAST(service_start_date AS STRING)) AS service_start,
+      DATE_ADD(
+        SAFE.PARSE_DATE('%Y%m%d', CAST(service_end_date AS STRING)),
+        INTERVAL 1 DAY
+      ) AS service_end_exclusive,
+    FROM invoice_classified
+    WHERE payment_status = 'Paid'
   )
+  where service_start >= restart_date 
+  and service_start <= service_end_exclusive
 ),
-lk as (  
-  SELECT distinct 
-    lower(trim(l.billing_account)) as billing_account, 
-    l.circ_idsubscrip as id_subscrip,
-    l.product_type
-  from `gannett-enterprise-data.consumers_linkage_cz.subscription_link_latest` l 
-  where l.billing_system = 'ZUORA' and circ_site != 'PLAY'
+rate_plan_flags AS (
+  SELECT
+    p.origin_id_subscrip,
+    COUNTIF(REGEXP_CONTAINS(UPPER(COALESCE(m.description, '')), r'YEAR|12M')) > 0
+      AS has_annual_plan,
+    COUNTIF(
+      REGEXP_CONTAINS(UPPER(COALESCE(m.description, '')), r'\bFOR\b')
+      OR r.monthly_rate <= 1.10
+    ) > 0 AS has_promotional_plan,
+    COUNTIF(REGEXP_CONTAINS(UPPER(COALESCE(m.description, '')), r'STOP[ -]?SAVE')) > 0
+      AS has_restart_stop_save
+  FROM restart_pairs p
+  JOIN `gannett-enterprise-data.consumers_curated_zone_assets.subscriptions_rate_new` r
+    ON r.id_subscrip = p.restart_id_subscrip
+  LEFT JOIN `gannett-enterprise-data.consumers_rfz.rate_mapping_combined` m
+    ON LOWER(TRIM(r.rate_key_system)) = LOWER(TRIM(m.rate_key_system))
+    AND r.rate_key_value = m.rate_key_value
+  WHERE r.effective_date BETWEEN p.restart_date AND as_of_date
+  GROUP BY p.origin_id_subscrip
 ),
-ss_applied as (   -- link billing_account and id_subscrip
-  select * from (
-    select 
-      lk.id_subscrip,
-      raw.*
-    from raw 
-    left join lk on
-    raw.billing_account = lk.billing_account   
-    where raw.cohort = 'Two-Offer Cohort'
-    union all
-    select 
-      p.id_subscrip,
-      raw.*
-    from raw 
-    left join `gannett-datascience.test_activation_zone.stop_save_test_Bart` p on
-    raw.billing_account = lower(trim(p.billing_account))   
-    and raw.inference_date = p.inference_date
-    where raw.cohort = 'Three-Offer Cohort' 
-  )
-  where id_subscrip is not null 
-  QUALIFY 
-  COUNT(DISTINCT id_subscrip) OVER(PARTITION BY billing_account) = 1
-  and 
-  COUNT(DISTINCT email_date) OVER(PARTITION BY billing_account) = 1
+invoice_metrics AS (
+  SELECT
+    h.*,
+    CAST(stop_save_price AS NUMERIC)
+      * CAST(exposure_days AS NUMERIC)
+      / CAST(30.4375 AS NUMERIC) AS full_fix_revenue,
+    COUNT(DISTINCT i.id_invoice) AS all_paid_invoice_count,
+    COUNT(DISTINCT IF(
+      i.id_payment_date < h.window_end_exclusive,
+      i.id_invoice,
+      NULL
+    )) AS current_window_paid_invoice_count,
+    COALESCE(SUM(
+      CASE
+        WHEN i.service_end_exclusive <= h.window_end_exclusive then i.paid_invoice_value
+        WHEN i.service_start <= h.window_end_exclusive
+        THEN i.paid_invoice_value * SAFE_DIVIDE(
+          CAST(DATE_DIFF(h.window_end_exclusive, i.service_start, DAY) AS NUMERIC),
+          i.service_period
+        )
+        ELSE 0
+      END
+    ), 0) AS current_earned_revenue,
+    COALESCE(SUM(
+      CASE
+        WHEN i.id_payment_date < h.window_end_exclusive
+        THEN i.paid_invoice_value
+        ELSE 0
+      END
+    ), 0) AS current_paid_invoice_value
+  FROM origin_horizons h
+  LEFT JOIN restart_pairs p
+    ON h.origin_id_subscrip = p.origin_id_subscrip
+  LEFT JOIN paid_invoices i
+    ON p.restart_id_subscrip = i.restart_id_subscrip
+  GROUP BY ALL
 ),
-b as (
-  select distinct
-    ss_applied.* except(id_subscrip), 
-    ss_applied.id_subscrip as id_subscrip_manual, 
-    g.* except(zuora_billing_account, pricing_notice_date, pricing_effective_date, pre_pricing_monthly_price, target_monthly_price) 
-  from ss_applied
-  left join `gannett-datascience.test_results_zone.ss_test_result_v3-0_gcp_event` g on
-    ss_applied.billing_account = g.zuora_billing_account
+metrics_base AS (
+  SELECT
+    i.*,
+    full_fix_revenue * CAST(0.25 AS NUMERIC) AS fix_revenue_25pct,
+    full_fix_revenue * CAST(0.50 AS NUMERIC) AS fix_revenue_50pct,
+    full_fix_revenue * CAST(0.75 AS NUMERIC) AS fix_revenue_75pct,
+    COALESCE(r.has_annual_plan, FALSE) AS has_annual_plan,
+    COALESCE(r.has_promotional_plan, FALSE) AS has_promotional_plan,
+    COALESCE(r.has_restart_stop_save, FALSE) AS has_restart_stop_save,
+  FROM invoice_metrics i
+  LEFT JOIN rate_plan_flags r
+    USING (origin_id_subscrip)
 ),
-p1 as (
-  select
-    b.*,
-    y.risk_tier as src_risk_tier,
-    zf.frequency, zf.breadth, zf.tenure, cast(zf.tt_cost AS NUMERIC) as tt_cost,
-    concat(b.Treatment, ' - ', y.risk_tier) as treatment_plus_tier,
-    cast(REGEXP_EXTRACT(b.pricegroup, r'(\d+)') as int64) as pricegroup_order
-  from b
-  left join `gannett-datascience.test_activation_zone.stop_save_test_Bart` y on
-    lower(trim(y.billing_account)) = b.billing_account
-    and y.inference_date = b.inference_date
-  left join `gannett-enterprise-data.models_sz.source_pchurn_staging` zf on
-    b.inference_date = zf.inference_date
-    and b.id_subscrip = zf.id_subscrip
-),
-pays as ( 
-  select 
-    *
-  from (
-    SELECT 
-      lower(trim(p.account)) as billing_account,  p.id_subscrip,
-      invoice_number,
-      amount_without_tax+balance as billing_amount,   -- known issue: 0.9% null payment amount (263/28182)
-      balance,
-      id_payment_date,
-      case
-        WHEN id_payment_date is not null and id_decline_date is null then 'Paid' -- Normal payment
-        WHEN id_payment_date is not null and id_decline_date is not null and id_payment_date>=id_decline_date then 'Paid' -- Payment Date is after Decline
-        WHEN id_payment_date is null and id_decline_date is null and amount=0 and status='Posted' then 'Paid' -- First Invoice Free
-        WHEN id_payment_date is null and id_decline_date is not null then 'Not Paid' -- Normal decline
-        WHEN id_payment_date is not null and id_decline_date is not null and id_payment_date<id_decline_date then 'Not Paid' -- Payment reverse
-        WHEN id_payment_date is null and id_decline_date is null then 'Not Paid'
-        ELSE 'Other'
-      END AS payment_status,
-      payment_term
-    FROM `gannett-enterprise-data.consumers_curated_zone_assets.subscriptions_invoice_payment` p
-    where id_payment_date >= '2026-04-03'
-  )
-  where payment_status = 'Paid' 
-  and balance >= 0
-),
-restarts as (
-  SELECT 
-    p1.Repeat_Restarts,
-    p1.id_subscrip as id_subscrip_origin, -- perm_stop_sys_date, perm_stop_date, 
-    p1.stop_save_price,
-    history.id_subscrip as restart_idsub, history.event_date as restart_date
-  FROM p1,
-  UNNEST(restart_history) AS history
-  where Repeat_Restarts != 'not repeat restarts'
-),
-restart_pay as (
-    select
-      r.*,
-      p.id_payment_date, 
-      p.billing_amount as bill_amount_raw,
-    from restarts r
-    join pays p on
-      r.restart_idsub = p.id_subscrip
-      and p.id_payment_date >= r.restart_date
-    order by 1, 3
-),
-rate_mdm as (
-  select r.id_subscrip, r.effective_date, r.end_date, m.monthly_price, m.description
-  from `gannett-enterprise-data.consumers_curated_zone_assets.subscriptions_rate_new` r
-  join `gannett-enterprise-data.consumers_rfz.rate_mapping_combined` m on
-  lower(trim(r.rate_key_system)) = lower(trim(m.rate_key_system))
-  and r.rate_key_value = m.rate_key_value
-),
-restart_pay_rate as (
-  select 
-    rs.*,
-    r.* except(id_subscrip)
-  from restart_pay rs 
-  join rate_mdm r on
-    r.id_subscrip = rs.restart_idsub
-    and rs.id_payment_date between r.effective_date and r.end_date
+metrics AS (
+  SELECT
+    *,
+    full_fix_revenue - current_earned_revenue AS incremental_revenue_100pct,
+    fix_revenue_25pct- current_earned_revenue AS incremental_revenue_25pct,
+    fix_revenue_50pct - current_earned_revenue AS incremental_revenue_50pct,
+    fix_revenue_75pct - current_earned_revenue AS incremental_revenue_75pct,
+    SAFE_DIVIDE(current_earned_revenue, full_fix_revenue)
+      AS break_even_acceptance_rate
+  FROM metrics_base
 )
 SELECT
   *,
-FROM restart_pay_rate
+  ARRAY_TO_STRING(ARRAY(
+    SELECT flag
+    FROM UNNEST([
+      IF(all_paid_invoice_count = 0, 'no_paid_invoices', NULL)
+    ]) AS flag
+    WHERE flag IS NOT NULL
+  ), ' | ') AS data_quality_flags
+FROM metrics;
+
+CREATE OR REPLACE TABLE
+  `gannett-datascience.stop_save_refactor_staging.dev_restarts_revenue_detail`
+OPTIONS (
+  description = 'Account-level earned and paid-invoice revenue scenarios for repeat restarters.'
+)
+AS
+SELECT *
+FROM restart_revenue_work;
+
+CREATE OR REPLACE TABLE
+  `gannett-datascience.stop_save_refactor_staging.dev_restarts_revenue_summary`
+OPTIONS (
+  description = 'Aggregated repeat-restart loophole scenarios by restart type and experiment segment.'
+)
+AS
+SELECT
+  as_of_date,
+  horizon,
+  horizon_days,
+  restart_type,
+  cohort,
+  Treatment,
+  COUNT(distinct origin_id_subscrip) AS origin_subscriptions,
+  SUM(COALESCE(new_subid_counts, 0)) AS restart_subscriptions,
+  COUNTIF(data_quality_flags != '') AS origins_with_quality_flags,
+  ROUND(SUM(full_fix_revenue), 2) AS full_fix_revenue,
+  ROUND(SUM(current_earned_revenue), 2) AS current_earned_revenue,
+  ROUND(SUM(current_paid_invoice_value), 2) AS current_paid_invoice_value,
+  ROUND(SUM(fix_revenue_25pct), 2) AS fix_revenue_25pct,
+  ROUND(SUM(fix_revenue_50pct), 2) AS fix_revenue_50pct,
+  ROUND(SUM(fix_revenue_75pct), 2) AS fix_revenue_75pct,
+  ROUND(SUM(incremental_revenue_25pct), 2) AS incremental_revenue_25pct,
+  ROUND(SUM(incremental_revenue_50pct), 2) AS incremental_revenue_50pct,
+  ROUND(SUM(incremental_revenue_75pct), 2) AS incremental_revenue_75pct,
+  ROUND(SUM(incremental_revenue_100pct), 2) AS incremental_revenue_100pct,
+  SAFE_DIVIDE(SUM(current_earned_revenue), SUM(full_fix_revenue))
+    AS weighted_break_even_acceptance_rate
+FROM `gannett-datascience.stop_save_refactor_staging.dev_restarts_revenue_detail`
+GROUP BY ALL;
+
+SELECT *
+FROM `gannett-datascience.stop_save_refactor_staging.dev_restarts_revenue_summary`
+ORDER BY horizon_days, horizon, restart_type, cohort, Treatment;
