@@ -29,7 +29,7 @@ origins AS (
     stop_save_price,
     new_subid_counts,
     restart_history,
-    perm_stop_sys_date AS analysis_start_date,
+    perm_stop_date AS analysis_start_date,
     REPLACE(Repeat_Restarts, 'repeat restart via ', '') AS restart_type
   FROM `gannett-datascience.stop_save_refactor_staging.ss_test_result_p1_p2_combined`
   WHERE Repeat_Restarts IN (
