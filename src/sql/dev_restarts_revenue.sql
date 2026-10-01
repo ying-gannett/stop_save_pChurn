@@ -21,18 +21,12 @@ WITH horizon_definitions AS (
 origins AS (
   SELECT
     inference_date,
-    -- billing_account,
     id_subscrip AS origin_id_subscrip,
     website_id,
     cohort,
     Treatment,
-    -- src_risk_tier,
-    -- pricegroup,
-    -- contact_channels,
     Repeat_Restarts,
     stop_save_price,
-    -- perm_stop_sys_date,
-    -- perm_stop_date,
     new_subid_counts,
     restart_history,
     perm_stop_sys_date AS analysis_start_date,
@@ -51,6 +45,7 @@ restart_pairs AS (
   FROM origins o
   CROSS JOIN UNNEST(o.restart_history) AS history
   WHERE history.id_subscrip IS NOT NULL
+    AND history.event_date <= as_of_date
   GROUP BY
     o.origin_id_subscrip,
     history.id_subscrip
@@ -110,8 +105,7 @@ invoice_classified AS (
   ) r
   JOIN `gannett-enterprise-data.consumers_curated_zone_assets.subscriptions_invoice_payment` p
     ON p.id_subscrip = r.restart_id_subscrip
-  where balance >= 0
-  and p.id_payment_date >= r.restart_date
+  WHERE balance >= 0
 ),
 paid_invoices AS (
   select 
@@ -128,20 +122,20 @@ paid_invoices AS (
     FROM invoice_classified
     WHERE payment_status = 'Paid'
   )
-  where service_start >= restart_date 
-  and service_start <= service_end_exclusive
+  WHERE service_start >= restart_date
+    AND service_start < service_end_exclusive
 ),
 rate_plan_flags AS (
   SELECT
     p.origin_id_subscrip,
     COUNTIF(REGEXP_CONTAINS(UPPER(COALESCE(m.description, '')), r'YEAR|12M')) > 0
-      AS has_annual_plan,
+      AS had_annual_plan_by_as_of_date,
     COUNTIF(
       REGEXP_CONTAINS(UPPER(COALESCE(m.description, '')), r'\bFOR\b')
       OR r.monthly_rate <= 1.10
-    ) > 0 AS has_promotional_plan,
+    ) > 0 AS had_promotional_plan_by_as_of_date,
     COUNTIF(REGEXP_CONTAINS(UPPER(COALESCE(m.description, '')), r'STOP[ -]?SAVE')) > 0
-      AS has_restart_stop_save
+      AS had_restart_stop_save_by_as_of_date
   FROM restart_pairs p
   JOIN `gannett-enterprise-data.consumers_curated_zone_assets.subscriptions_rate_new` r
     ON r.id_subscrip = p.restart_id_subscrip
@@ -182,7 +176,7 @@ invoice_metrics AS (
       END
     ), 0) AS current_paid_invoice_value
   FROM origin_horizons h
-  LEFT JOIN restart_pairs p
+  JOIN restart_pairs p
     ON h.origin_id_subscrip = p.origin_id_subscrip
   LEFT JOIN paid_invoices i
     ON p.restart_id_subscrip = i.restart_id_subscrip
@@ -194,9 +188,11 @@ metrics_base AS (
     full_fix_revenue * CAST(0.25 AS NUMERIC) AS fix_revenue_25pct,
     full_fix_revenue * CAST(0.50 AS NUMERIC) AS fix_revenue_50pct,
     full_fix_revenue * CAST(0.75 AS NUMERIC) AS fix_revenue_75pct,
-    COALESCE(r.has_annual_plan, FALSE) AS has_annual_plan,
-    COALESCE(r.has_promotional_plan, FALSE) AS has_promotional_plan,
-    COALESCE(r.has_restart_stop_save, FALSE) AS has_restart_stop_save,
+    COALESCE(r.had_annual_plan_by_as_of_date, FALSE) AS had_annual_plan_by_as_of_date,
+    COALESCE(r.had_promotional_plan_by_as_of_date, FALSE)
+      AS had_promotional_plan_by_as_of_date,
+    COALESCE(r.had_restart_stop_save_by_as_of_date, FALSE)
+      AS had_restart_stop_save_by_as_of_date,
   FROM invoice_metrics i
   LEFT JOIN rate_plan_flags r
     USING (origin_id_subscrip)
