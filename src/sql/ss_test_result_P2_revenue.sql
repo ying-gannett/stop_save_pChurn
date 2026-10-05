@@ -212,37 +212,6 @@ paid_invoices AS (
       OR id_payment_date >= component_start_date
     )
 ),
-rate_descriptions AS (
-  SELECT
-    'Caliber' AS rate_key_system,
-    rate_key_caliber AS rate_key_value,
-    description
-  FROM `gannett-enterprise-data.mdm_cz.rate_mapping_caliber`
-
-  UNION ALL
-
-  SELECT
-    'Genesys',
-    rate_key,
-    CAST(NULL AS STRING)
-  FROM `gannett-enterprise-data.mdm_cz.rate_mapping_genesys`
-
-  UNION ALL
-
-  SELECT
-    'NCS',
-    rate_key_ncs,
-    description
-  FROM `gannett-enterprise-data.mdm_cz.rate_mapping_ncs`
-
-  UNION ALL
-
-  SELECT
-    'ZUORA',
-    rate_key_zuora,
-    rate_description
-  FROM `gannett-enterprise-data.mdm_cz.rate_mapping_zuora`
-),
 rate_plan_flags AS (
   SELECT
     s.origin_id_subscrip,
@@ -257,7 +226,7 @@ rate_plan_flags AS (
   FROM restart_pairs s
   JOIN `gannett-enterprise-data.consumers_curated_zone_assets.subscriptions_rate_new` r
     ON r.id_subscrip = s.restart_id_subscrip
-  LEFT JOIN rate_descriptions m
+  LEFT JOIN `gannett-enterprise-data.consumers_rfz.rate_mapping_combined` m
     ON LOWER(TRIM(r.rate_key_system)) = LOWER(TRIM(m.rate_key_system))
     AND r.rate_key_value = m.rate_key_value
   WHERE r.effective_date BETWEEN s.restart_date AND as_of_date
