@@ -43,7 +43,7 @@ stop_save_pChurn/
 ├── notebooks/                      # Jupyter notebooks for analysis and experimentation
 ├── src/
 │   ├── sql/                        # BQ scripts
-│   │   └── ss_test_result_P2_revenue.sql  # Original/restart revenue horizons
+│   │   └── ss_test_result_P2_revenue.sql  # Repeat-restarter revenue horizons
 │   ├── data_processing.py          # SQL execution
 │   ├── data_assessment.py          # Data quality assessment and logging
 │   ├── run_prepare_data.py         # Ordered, staging-first weekly workflow
@@ -62,7 +62,7 @@ The preparation workflow runs six stages in order:
 2. Catch up daily GA platform partitions from `raw_ga_platform.sql`.
 3. Refresh P1 GCP event results.
 4. Refresh P2 unfiltered and filtered results.
-5. Refresh the P2 original/restart revenue detail and summary tables.
+5. Refresh the repeat-restarter revenue detail and summary tables.
 6. Refresh the usage-analysis feature table.
 
 The full runner defaults to the isolated

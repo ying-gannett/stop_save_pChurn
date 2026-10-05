@@ -78,6 +78,12 @@ class WorkflowConfigurationTests(unittest.TestCase):
         self.assertIn(tables.p2_combined_table, revenue_sql)
         self.assertIn(tables.p2_revenue_detail_table, revenue_sql)
         self.assertIn("DATE '2026-09-30'", revenue_sql)
+        self.assertIn(
+            "gannett-enterprise-data.consumers_rfz.rate_mapping_combined",
+            revenue_sql,
+        )
+        self.assertNotIn("gannett-enterprise-data.mdm_cz.rate_mapping_", revenue_sql)
+        self.assertNotIn("revenue_component", revenue_sql)
 
     def test_unknown_sql_template_token_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "unknown_table"):

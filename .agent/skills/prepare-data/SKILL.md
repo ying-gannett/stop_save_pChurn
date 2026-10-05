@@ -15,7 +15,7 @@ The workflow runs these stages in order and stops after any failure or assessmen
 2. Catch up daily `ss_test_ga4_platform` partitions through that Sunday.
 3. Run `ss_test_result_P1_gcp_events.sql`.
 4. Run `ss_test_result_P2_gcp_sourced.sql`.
-5. Run `ss_test_result_P2_revenue.sql` for original/restart 30-, 60-, 90-day, and to-date revenue.
+5. Run `ss_test_result_P2_revenue.sql` for repeat-restarter 30-, 60-, 90-day, and to-date revenue scenarios.
 6. Run `ss_test_result_P2_gcp_sourced_add_feas.sql`.
 
 Run it in staging:
@@ -73,7 +73,7 @@ uv run python src/run_prepare_data.py \
   --revenue-as-of-date YYYY-MM-DD
 ```
 
-The detail table grain is original subscription × revenue component (`original` or `restart`) × horizon. Original windows start after both contact and pricing effectiveness; restart windows start on the original subscription's effective permanent-stop date. The summary also includes `all_components` rows. Fixed horizons include only fully observed origins.
+The detail table grain is original subscription × horizon for users labeled as repeat restarters via intro or winback. Observation windows start on the original subscription's effective permanent-stop date. The query compares paid revenue from restarted subscriptions with scenarios in which the user instead remained at the original monthly stop-save price. Fixed horizons include only fully observed origins.
 
 ## Failure rules
 

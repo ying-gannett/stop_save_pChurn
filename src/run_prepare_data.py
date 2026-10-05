@@ -274,7 +274,7 @@ def require_revenue_tables(
           (SELECT COUNT(*) FROM `{tables.p2_revenue_detail_table}`) AS detail_count,
           (SELECT COUNT(*) FROM `{tables.p2_revenue_summary_table}`) AS summary_count,
           (SELECT COUNT(*) - COUNT(DISTINCT CONCAT(
-             origin_id_subscrip, '|', revenue_component, '|', horizon
+             origin_id_subscrip, '|', horizon
            ))
            FROM `{tables.p2_revenue_detail_table}`) AS duplicate_detail_keys,
           (SELECT COUNTIF(as_of_date != DATE '{as_of_date.isoformat()}')
@@ -449,7 +449,7 @@ def run_revenue_stage(
     tables: WorkflowTables,
     as_of_date: datetime.date,
 ) -> None:
-    print("\n=== Stage 5/6: P2 revenue analysis ===")
+    print("\n=== Stage 5/6: repeat-restart revenue analysis ===")
     execute_sql_script(
         client,
         REVENUE_SQL,

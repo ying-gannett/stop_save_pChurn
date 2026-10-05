@@ -6,7 +6,7 @@
 -- This is a scenario analysis, not a causal estimate. The 100% fix scenario assumes
 -- every repeat restarter would have remained on the original monthly stop-save rate.
 
-DECLARE as_of_date DATE DEFAULT DATE '2026-09-30';
+DECLARE as_of_date DATE DEFAULT DATE '{{revenue_as_of_date}}';
 
 CREATE TEMP TABLE restart_revenue_work AS
 WITH horizon_definitions AS (
@@ -31,7 +31,7 @@ origins AS (
     restart_history,
     perm_stop_date AS analysis_start_date,
     REPLACE(Repeat_Restarts, 'repeat restart via ', '') AS restart_type
-  FROM `gannett-datascience.stop_save_refactor_staging.ss_test_result_p1_p2_combined`
+  FROM `{{p2_combined_table}}`
   WHERE Repeat_Restarts IN (
     'repeat restart via intro',
     'repeat restart via winback'
@@ -220,7 +220,7 @@ SELECT
 FROM metrics;
 
 CREATE OR REPLACE TABLE
-  `gannett-datascience.stop_save_refactor_staging.dev_restarts_revenue_detail`
+  `{{p2_revenue_detail_table}}`
 OPTIONS (
   description = 'Account-level earned and paid-invoice revenue scenarios for repeat restarters.'
 )
@@ -229,7 +229,7 @@ SELECT *
 FROM restart_revenue_work;
 
 CREATE OR REPLACE TABLE
-  `gannett-datascience.stop_save_refactor_staging.dev_restarts_revenue_summary`
+  `{{p2_revenue_summary_table}}`
 OPTIONS (
   description = 'Aggregated repeat-restart loophole scenarios by restart type and experiment segment.'
 )
@@ -256,9 +256,9 @@ SELECT
   ROUND(SUM(incremental_revenue_100pct), 2) AS incremental_revenue_100pct,
   SAFE_DIVIDE(SUM(current_earned_revenue), SUM(full_fix_revenue))
     AS weighted_break_even_acceptance_rate
-FROM `gannett-datascience.stop_save_refactor_staging.dev_restarts_revenue_detail`
+FROM `{{p2_revenue_detail_table}}`
 GROUP BY ALL;
 
 SELECT *
-FROM `gannett-datascience.stop_save_refactor_staging.dev_restarts_revenue_summary`
+FROM `{{p2_revenue_summary_table}}`
 ORDER BY horizon_days, horizon, restart_type, cohort, Treatment;
