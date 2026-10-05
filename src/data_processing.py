@@ -204,13 +204,22 @@ def render_sql_template(sql_template: str, values: Mapping[str, str]) -> str:
     return rendered
 
 
-def load_and_render_sql(sql_file: str | Path, tables: WorkflowTables) -> str:
+def load_and_render_sql(
+    sql_file: str | Path,
+    tables: WorkflowTables,
+    extra_values: Mapping[str, str] | None = None,
+) -> str:
     """Load a workflow SQL file and resolve its environment-specific tokens."""
     path = Path(sql_file)
     if not path.is_file():
         raise FileNotFoundError(f"SQL file not found: {path}")
     values = tables.template_values()
     values["intervention_inference_date_sql"] = intervention_inference_date_sql()
+    if extra_values:
+        overlap = values.keys() & extra_values.keys()
+        if overlap:
+            raise ValueError(f"Template values cannot override: {', '.join(sorted(overlap))}")
+        values.update(extra_values)
     return render_sql_template(path.read_text(), values)
 
 
@@ -218,9 +227,10 @@ def execute_sql_script(
     client: bigquery.Client,
     sql_file: str | Path,
     tables: WorkflowTables,
+    extra_values: Mapping[str, str] | None = None,
 ) -> None:
     """Execute SQL that creates its own destination table or tables."""
-    rendered_sql = load_and_render_sql(sql_file, tables)
+    rendered_sql = load_and_render_sql(sql_file, tables, extra_values)
     print(f"Executing self-materializing BigQuery script `{sql_file}`...")
     query_job = client.query(rendered_sql)
     query_job.result()

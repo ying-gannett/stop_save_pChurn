@@ -29,6 +29,8 @@ class WorkflowTables:
     p1_event_table: str
     p2_unfiltered_table: str
     p2_combined_table: str
+    p2_revenue_detail_table: str
+    p2_revenue_summary_table: str
     usage_analysis_table: str
     intervention_table: str
     selected_markets_table: str
@@ -37,13 +39,15 @@ class WorkflowTables:
         return asdict(self)
 
     def managed_outputs(self) -> dict[str, str]:
-        """Return the six mutable outputs controlled by this workflow."""
+        """Return the mutable outputs controlled by this workflow."""
         return {
             "stop_save_source": self.stop_save_source_table,
             "ga_platform": self.ga_platform_table,
             "p1_event": self.p1_event_table,
             "p2_unfiltered": self.p2_unfiltered_table,
             "p2_combined": self.p2_combined_table,
+            "p2_revenue_detail": self.p2_revenue_detail_table,
+            "p2_revenue_summary": self.p2_revenue_summary_table,
             "usage_analysis": self.usage_analysis_table,
         }
 
@@ -86,7 +90,7 @@ def resolve_workflow_tables(
 ) -> WorkflowTables:
     """Resolve all workflow-managed tables for staging or production.
 
-    Staging redirects all six mutable workflow tables to the staging dataset.
+    Staging redirects all mutable workflow tables to the staging dataset.
     External intervention and market-reference inputs remain read-only production
     sources in both environments.
     """
@@ -122,6 +126,12 @@ def resolve_workflow_tables(
         ),
         p2_combined_table=qualified_table(
             project, mutable_results_dataset, "ss_test_result_p1_p2_combined"
+        ),
+        p2_revenue_detail_table=qualified_table(
+            project, mutable_results_dataset, "ss_test_result_p2_revenue_detail"
+        ),
+        p2_revenue_summary_table=qualified_table(
+            project, mutable_results_dataset, "ss_test_result_p2_revenue_summary"
         ),
         usage_analysis_table=qualified_table(
             project, mutable_results_dataset, "ss_test_result_usage_analysis"

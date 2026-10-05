@@ -13,6 +13,7 @@ from src.run_prepare_data import (
     GA_EARLIEST_DATE,
     determine_ga_target_dates,
     report_output_comparison,
+    require_revenue_tables,
     require_result_tables,
     require_usage_table,
     run_ga_stage,
@@ -26,11 +27,11 @@ from src.workflow_config import (
 
 
 class WorkflowConfigurationTests(unittest.TestCase):
-    def test_staging_redirects_all_six_mutable_tables(self):
+    def test_staging_redirects_all_mutable_tables(self):
         tables = resolve_workflow_tables("staging")
 
         mutable_tables = tables.managed_outputs().values()
-        self.assertEqual(len(tables.managed_outputs()), 6)
+        self.assertEqual(len(tables.managed_outputs()), 8)
         self.assertTrue(all(".stop_save_refactor_staging." in table for table in mutable_tables))
         self.assertEqual(
             tables.intervention_table,
@@ -68,6 +69,15 @@ class WorkflowConfigurationTests(unittest.TestCase):
         self.assertIn(tables.intervention_table, p2_sql)
         self.assertIn(tables.stop_save_source_table, p2_sql)
         self.assertIn(tables.p1_event_table, p2_sql)
+
+        revenue_sql = load_and_render_sql(
+            "src/sql/ss_test_result_P2_revenue.sql",
+            tables,
+            {"revenue_as_of_date": "2026-09-30"},
+        )
+        self.assertIn(tables.p2_combined_table, revenue_sql)
+        self.assertIn(tables.p2_revenue_detail_table, revenue_sql)
+        self.assertIn("DATE '2026-09-30'", revenue_sql)
 
     def test_unknown_sql_template_token_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "unknown_table"):
@@ -228,6 +238,11 @@ class WorkflowOrchestrationTests(unittest.TestCase):
             ),
             patch.object(
                 run_prepare_data,
+                "run_revenue_stage",
+                side_effect=lambda *_: observed.append("revenue"),
+            ),
+            patch.object(
+                run_prepare_data,
                 "report_output_comparison",
                 side_effect=lambda *_: observed.append("comparison"),
             ),
@@ -241,7 +256,7 @@ class WorkflowOrchestrationTests(unittest.TestCase):
 
         self.assertEqual(
             observed,
-            ["preflight", "source", "ga", "p1", "p2", "features", "comparison"],
+            ["preflight", "source", "ga", "p1", "p2", "revenue", "features", "comparison"],
         )
 
     def test_full_workflow_stops_after_failed_stage(self):
@@ -362,6 +377,50 @@ class WorkflowOrchestrationTests(unittest.TestCase):
                 client,
                 self.tables.usage_analysis_table,
                 datetime.date(2026, 9, 20),
+            )
+
+    def test_revenue_validation_rejects_duplicate_detail_keys(self):
+        class QueryJob:
+            def result(self):
+                return [
+                    {
+                        "detail_count": 10,
+                        "summary_count": 2,
+                        "duplicate_detail_keys": 1,
+                        "wrong_as_of_date_count": 0,
+                        "earned_exceeds_paid_count": 0,
+                    }
+                ]
+
+        client = Mock()
+        client.query.return_value = QueryJob()
+        with self.assertRaisesRegex(RuntimeError, "keys are not unique"):
+            require_revenue_tables(
+                client,
+                self.tables,
+                datetime.date(2026, 9, 30),
+            )
+
+    def test_revenue_validation_rejects_earned_revenue_above_paid_value(self):
+        class QueryJob:
+            def result(self):
+                return [
+                    {
+                        "detail_count": 10,
+                        "summary_count": 2,
+                        "duplicate_detail_keys": 0,
+                        "wrong_as_of_date_count": 0,
+                        "earned_exceeds_paid_count": 1,
+                    }
+                ]
+
+        client = Mock()
+        client.query.return_value = QueryJob()
+        with self.assertRaisesRegex(RuntimeError, "earned revenue exceeds"):
+            require_revenue_tables(
+                client,
+                self.tables,
+                datetime.date(2026, 9, 30),
             )
 
 

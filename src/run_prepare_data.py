@@ -7,6 +7,7 @@ import datetime
 from pathlib import Path
 from typing import Sequence
 
+from google.api_core.exceptions import NotFound
 from google.cloud import bigquery
 
 try:
@@ -53,6 +54,7 @@ GA_PLATFORM_SQL = Path("src/sql/raw_ga_platform.sql")
 P1_SQL = Path("src/sql/ss_test_result_P1_gcp_events.sql")
 P2_SQL = Path("src/sql/ss_test_result_P2_gcp_sourced.sql")
 FEATURE_SQL = Path("src/sql/ss_test_result_P2_gcp_sourced_add_feas.sql")
+REVENUE_SQL = Path("src/sql/ss_test_result_P2_revenue.sql")
 
 PCHURN_GUARDRAIL = "gannett-enterprise-data.models_sz.pchurn_do_risk_tiers"
 GA_EARLIEST_DATE = datetime.date(2025, 12, 29)
@@ -260,6 +262,43 @@ def require_usage_table(
     )
 
 
+def require_revenue_tables(
+    client: bigquery.Client,
+    tables: WorkflowTables,
+    as_of_date: datetime.date,
+) -> None:
+    row = _query_one(
+        client,
+        f"""
+        SELECT
+          (SELECT COUNT(*) FROM `{tables.p2_revenue_detail_table}`) AS detail_count,
+          (SELECT COUNT(*) FROM `{tables.p2_revenue_summary_table}`) AS summary_count,
+          (SELECT COUNT(*) - COUNT(DISTINCT CONCAT(
+             origin_id_subscrip, '|', revenue_component, '|', horizon
+           ))
+           FROM `{tables.p2_revenue_detail_table}`) AS duplicate_detail_keys,
+          (SELECT COUNTIF(as_of_date != DATE '{as_of_date.isoformat()}')
+           FROM `{tables.p2_revenue_detail_table}`) AS wrong_as_of_date_count,
+          (SELECT COUNTIF(current_earned_revenue > current_paid_invoice_value)
+           FROM `{tables.p2_revenue_detail_table}`) AS earned_exceeds_paid_count
+        """,
+    )
+    if row["detail_count"] <= 0 or row["summary_count"] <= 0:
+        raise RuntimeError("Revenue validation failed: a revenue output table is empty.")
+    if row["duplicate_detail_keys"] != 0:
+        raise RuntimeError("Revenue validation failed: detail keys are not unique.")
+    if row["wrong_as_of_date_count"] != 0:
+        raise RuntimeError("Revenue validation failed: detail rows use the wrong as-of date.")
+    if row["earned_exceeds_paid_count"] != 0:
+        raise RuntimeError(
+            "Revenue validation failed: earned revenue exceeds paid invoice value."
+        )
+    print(
+        f"✅ Revenue outputs validated: {row['detail_count']:,} detail rows and "
+        f"{row['summary_count']:,} summary rows for as_of_date={as_of_date}."
+    )
+
+
 def report_output_comparison(
     client: bigquery.Client,
     tables: WorkflowTables,
@@ -274,7 +313,15 @@ def report_output_comparison(
     for name, table_id in tables.managed_outputs().items():
         production_table_id = production_tables.managed_outputs()[name]
         staged = client.get_table(table_id)
-        production = client.get_table(production_table_id)
+        try:
+            production = client.get_table(production_table_id)
+        except NotFound:
+            schemas_match = False
+            print(
+                f"{name}: staging rows={staged.num_rows:,}; "
+                f"production table `{production_table_id}` does not exist"
+            )
+            continue
         staged_fields = {field.name: (field.field_type, field.mode) for field in staged.schema}
         production_fields = {
             field.name: (field.field_type, field.mode) for field in production.schema
@@ -302,7 +349,7 @@ def report_output_comparison(
                 )
 
     if schemas_match:
-        print("✅ All six staging schemas match their production counterparts.")
+        print("✅ All staging schemas match their production counterparts.")
     else:
         print("⚠️ Staging schema changes require review before a production run.")
 
@@ -314,7 +361,7 @@ def run_source_stage(
     inference_date: datetime.date,
     local_output: str | None = None,
 ) -> None:
-    print("\n=== Stage 1/5: weekly pChurn source ===")
+    print("\n=== Stage 1/6: weekly pChurn source ===")
     local_path, dataframe = run_partition_query(
         client=client,
         target_date=inference_date,
@@ -346,7 +393,7 @@ def run_ga_stage(
     end_date: datetime.date,
     start_date: datetime.date | None = None,
 ) -> None:
-    print("\n=== Stage 2/5: daily GA platform catch-up ===")
+    print("\n=== Stage 2/6: daily GA platform catch-up ===")
     latest_date = get_latest_partition_date(client, tables.ga_platform_table, "event_date")
     target_dates = determine_ga_target_dates(latest_date, end_date, start_date)
     print(f"GA dates to process: {len(target_dates)}")
@@ -372,7 +419,7 @@ def run_ga_stage(
 
 
 def run_p1_stage(client: bigquery.Client, tables: WorkflowTables) -> None:
-    print("\n=== Stage 3/5: P1 GCP events ===")
+    print("\n=== Stage 3/6: P1 GCP events ===")
     execute_sql_script(client, P1_SQL, tables)
     require_nonempty_table(client, tables.p1_event_table)
 
@@ -382,7 +429,7 @@ def run_p2_stage(
     tables: WorkflowTables,
     inference_date: datetime.date,
 ) -> None:
-    print("\n=== Stage 4/5: P2 sourced results ===")
+    print("\n=== Stage 4/6: P2 sourced results ===")
     execute_sql_script(client, P2_SQL, tables)
     require_result_tables(client, tables, inference_date)
 
@@ -392,9 +439,24 @@ def run_feature_stage(
     tables: WorkflowTables,
     inference_date: datetime.date,
 ) -> None:
-    print("\n=== Stage 5/5: usage features ===")
+    print("\n=== Stage 6/6: usage features ===")
     execute_sql_script(client, FEATURE_SQL, tables)
     require_usage_table(client, tables.usage_analysis_table, inference_date)
+
+
+def run_revenue_stage(
+    client: bigquery.Client,
+    tables: WorkflowTables,
+    as_of_date: datetime.date,
+) -> None:
+    print("\n=== Stage 5/6: P2 revenue analysis ===")
+    execute_sql_script(
+        client,
+        REVENUE_SQL,
+        tables,
+        {"revenue_as_of_date": as_of_date.isoformat()},
+    )
+    require_revenue_tables(client, tables, as_of_date)
 
 
 def run_workflow(
@@ -405,11 +467,15 @@ def run_workflow(
     stage: str = "all",
     ga_end_date: str | None = None,
     ga_start_date: str | None = None,
+    revenue_as_of_date: str | None = None,
     local_output: str | None = None,
 ) -> None:
     inference_date = resolve_sunday(run_date)
     ga_end = datetime.date.fromisoformat(ga_end_date) if ga_end_date else inference_date
     ga_start = datetime.date.fromisoformat(ga_start_date) if ga_start_date else None
+    revenue_as_of = (
+        datetime.date.fromisoformat(revenue_as_of_date) if revenue_as_of_date else ga_end
+    )
     if stage in {"all", "ga"} and ga_end < inference_date:
         raise ValueError("--ga-end-date must cover the resolved weekly inference Sunday.")
 
@@ -427,12 +493,14 @@ def run_workflow(
         run_p1_stage(client, tables)
     if stage in {"all", "p2"}:
         run_p2_stage(client, tables, inference_date)
+    if stage in {"all", "revenue"}:
+        run_revenue_stage(client, tables, revenue_as_of)
     if stage in {"all", "features"}:
         run_feature_stage(client, tables, inference_date)
 
     if stage == "all":
         report_output_comparison(client, tables, production_tables)
-        print("\n✅ All five preparation stages completed and passed validation.")
+        print("\n✅ All six preparation stages completed and passed validation.")
     else:
         print(f"\n✅ Preparation stage `{stage}` completed and passed validation.")
 
@@ -448,7 +516,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--stage",
-        choices=("all", "source", "ga", "p1", "p2", "features"),
+        choices=("all", "source", "ga", "p1", "p2", "revenue", "features"),
         default="all",
         help="Run the full workflow or one stage. Defaults to all.",
     )
@@ -459,6 +527,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--ga-start-date",
         help="Required only when initializing an empty GA platform table.",
+    )
+    parser.add_argument(
+        "--revenue-as-of-date",
+        help="Inclusive revenue cutoff. Defaults to --ga-end-date.",
     )
     parser.add_argument(
         "--environment",
@@ -510,6 +582,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             stage=args.stage,
             ga_end_date=args.ga_end_date,
             ga_start_date=args.ga_start_date,
+            revenue_as_of_date=args.revenue_as_of_date,
             local_output=args.local_output,
         )
     except Exception as exc:

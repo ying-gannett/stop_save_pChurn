@@ -42,7 +42,8 @@ stop_save_pChurn/
 ├── data/                           # Local cache of BigQuery query results (Parquet)
 ├── notebooks/                      # Jupyter notebooks for analysis and experimentation
 ├── src/
-│   └── sql/                        # BQ scipts
+│   ├── sql/                        # BQ scripts
+│   │   └── ss_test_result_P2_revenue.sql  # Original/restart revenue horizons
 │   ├── data_processing.py          # SQL execution
 │   ├── data_assessment.py          # Data quality assessment and logging
 │   ├── run_prepare_data.py         # Ordered, staging-first weekly workflow
@@ -55,13 +56,14 @@ stop_save_pChurn/
 ## 🏃 Usage
 
 ### Data Preparation
-The preparation workflow runs five stages in order:
+The preparation workflow runs six stages in order:
 
 1. Write the weekly Sunday partition from `stop_save_source.sql`.
 2. Catch up daily GA platform partitions from `raw_ga_platform.sql`.
 3. Refresh P1 GCP event results.
 4. Refresh P2 unfiltered and filtered results.
-5. Refresh the usage-analysis feature table.
+5. Refresh the P2 original/restart revenue detail and summary tables.
+6. Refresh the usage-analysis feature table.
 
 The full runner defaults to the isolated
 `gannett-datascience.stop_save_refactor_staging` dataset:
@@ -71,10 +73,12 @@ uv run python src/run_prepare_data.py --run-date 2026-09-30
 ```
 
 The run date may be any day in the target week and resolves to that week's Sunday.
-Use `--ga-end-date` when GA should be caught up beyond that Sunday. The runner validates
-the intervention input, source partitions, GA coverage, row counts, and requested-week
-outputs, and stops immediately after a failed stage. A staging run also reports row-count
-and schema differences from production so intentional query changes can be reviewed.
+Use `--ga-end-date` when GA should be caught up beyond that Sunday. Revenue uses the GA
+end date as its inclusive cutoff unless `--revenue-as-of-date` is supplied. The runner
+validates the intervention input, source partitions, GA coverage, row counts,
+requested-week outputs, revenue keys, and revenue cutoff, and stops immediately after a
+failed stage. A staging run also reports row-count and schema differences from production
+so intentional query changes can be reviewed.
 
 Production execution is opt-in and should follow a successful staging comparison:
 
@@ -86,8 +90,10 @@ uv run python src/run_prepare_data.py \
 ```
 
 Run one stage through the same guarded entry point with `--stage source`, `--stage ga`,
-`--stage p1`, `--stage p2`, or `--stage features`. Individual stages assume their upstream
-tables are ready. All preparation commands use `src/run_prepare_data.py`.
+`--stage p1`, `--stage p2`, `--stage revenue`, or `--stage features`. Individual stages
+assume their upstream tables are ready. For a standalone revenue refresh, set
+`--revenue-as-of-date` explicitly when its cutoff should differ from the resolved Sunday.
+All preparation commands use `src/run_prepare_data.py`.
 
 The packaged agent instructions are in `prepare-data.skill`. After installing or updating
 the package, reload skills before invoking the workflow through an agent.
