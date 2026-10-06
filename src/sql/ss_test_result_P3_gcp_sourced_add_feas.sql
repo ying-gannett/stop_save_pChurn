@@ -88,4 +88,3 @@ left join ga on
   src.id_subscrip = ga.id_subscrip
   and src.inference_date = ga.inference_date
 
-

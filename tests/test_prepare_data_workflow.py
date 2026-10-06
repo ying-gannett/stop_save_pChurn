@@ -57,7 +57,7 @@ class WorkflowConfigurationTests(unittest.TestCase):
         sql_files = (
             "src/sql/ss_test_result_P1_gcp_events.sql",
             "src/sql/ss_test_result_P2_gcp_sourced.sql",
-            "src/sql/ss_test_result_P2_gcp_sourced_add_feas.sql",
+            "src/sql/ss_test_result_P3_gcp_sourced_add_feas.sql",
         )
 
         for sql_file in sql_files:
@@ -71,7 +71,7 @@ class WorkflowConfigurationTests(unittest.TestCase):
         self.assertIn(tables.p1_event_table, p2_sql)
 
         revenue_sql = load_and_render_sql(
-            "src/sql/ss_test_result_P2_revenue.sql",
+            "src/sql/ss_test_result_P3_revenue.sql",
             tables,
             {"revenue_as_of_date": "2026-09-30"},
         )

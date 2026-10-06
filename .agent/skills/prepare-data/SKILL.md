@@ -1,6 +1,6 @@
 ---
 name: prepare-data
-description: Run and validate the Stop & Save weekly BigQuery preparation workflow, including the weekly pChurn source, daily GA platform catch-up, ordered P1/P2 materializations, revenue horizons, and usage features. Use for full weekly refreshes or individual preparation stages.
+description: Run and validate the Stop & Save weekly BigQuery preparation workflow, including the weekly pChurn source, daily GA platform catch-up, ordered P1/P2/P3 materializations, revenue horizons, and usage features. Use for full weekly refreshes or individual preparation stages.
 ---
 
 # Prepare Stop & Save Data
@@ -15,8 +15,8 @@ The workflow runs these stages in order and stops after any failure or assessmen
 2. Catch up daily `ss_test_ga4_platform` partitions through that Sunday.
 3. Run `ss_test_result_P1_gcp_events.sql`.
 4. Run `ss_test_result_P2_gcp_sourced.sql`.
-5. Run `ss_test_result_P2_revenue.sql` for repeat-restarter 30-, 60-, 90-day, and to-date revenue scenarios.
-6. Run `ss_test_result_P2_gcp_sourced_add_feas.sql`.
+5. Run `ss_test_result_P3_revenue.sql` for repeat-restarter 30-, 60-, 90-day, and to-date revenue scenarios.
+6. Run `ss_test_result_P3_gcp_sourced_add_feas.sql`.
 
 Run it in staging:
 

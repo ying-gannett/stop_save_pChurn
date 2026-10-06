@@ -53,8 +53,8 @@ STOP_SAVE_SQL = Path("src/sql/stop_save_source.sql")
 GA_PLATFORM_SQL = Path("src/sql/raw_ga_platform.sql")
 P1_SQL = Path("src/sql/ss_test_result_P1_gcp_events.sql")
 P2_SQL = Path("src/sql/ss_test_result_P2_gcp_sourced.sql")
-FEATURE_SQL = Path("src/sql/ss_test_result_P2_gcp_sourced_add_feas.sql")
-REVENUE_SQL = Path("src/sql/ss_test_result_P2_revenue.sql")
+FEATURE_SQL = Path("src/sql/ss_test_result_P3_gcp_sourced_add_feas.sql")
+REVENUE_SQL = Path("src/sql/ss_test_result_P3_revenue.sql")
 
 PCHURN_GUARDRAIL = "gannett-enterprise-data.models_sz.pchurn_do_risk_tiers"
 GA_EARLIEST_DATE = datetime.date(2025, 12, 29)
