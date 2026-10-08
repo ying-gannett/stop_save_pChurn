@@ -31,6 +31,7 @@ class WorkflowTables:
     p2_combined_table: str
     p2_revenue_detail_table: str
     p2_revenue_summary_table: str
+    p3_revenue_table: str
     usage_analysis_table: str
     intervention_table: str
     selected_markets_table: str
@@ -46,8 +47,7 @@ class WorkflowTables:
             "p1_event": self.p1_event_table,
             "p2_unfiltered": self.p2_unfiltered_table,
             "p2_combined": self.p2_combined_table,
-            "p2_revenue_detail": self.p2_revenue_detail_table,
-            "p2_revenue_summary": self.p2_revenue_summary_table,
+            "p3_revenue": self.p3_revenue_table,
             "usage_analysis": self.usage_analysis_table,
         }
 
@@ -132,6 +132,9 @@ def resolve_workflow_tables(
         ),
         p2_revenue_summary_table=qualified_table(
             project, mutable_results_dataset, "ss_test_result_p2_revenue_summary"
+        ),
+        p3_revenue_table=qualified_table(
+            project, mutable_results_dataset, "ss_test_result_p3_revenue"
         ),
         usage_analysis_table=qualified_table(
             project, mutable_results_dataset, "ss_test_result_usage_analysis"

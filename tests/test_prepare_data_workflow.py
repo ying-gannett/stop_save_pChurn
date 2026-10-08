@@ -13,7 +13,7 @@ from src.run_prepare_data import (
     GA_EARLIEST_DATE,
     determine_ga_target_dates,
     report_output_comparison,
-    require_revenue_tables,
+    require_revenue_table,
     require_result_tables,
     require_usage_table,
     run_ga_stage,
@@ -31,7 +31,7 @@ class WorkflowConfigurationTests(unittest.TestCase):
         tables = resolve_workflow_tables("staging")
 
         mutable_tables = tables.managed_outputs().values()
-        self.assertEqual(len(tables.managed_outputs()), 8)
+        self.assertEqual(len(tables.managed_outputs()), 7)
         self.assertTrue(all(".stop_save_refactor_staging." in table for table in mutable_tables))
         self.assertEqual(
             tables.intervention_table,
@@ -73,11 +73,11 @@ class WorkflowConfigurationTests(unittest.TestCase):
         revenue_sql = load_and_render_sql(
             "src/sql/ss_test_result_P3_revenue.sql",
             tables,
-            {"revenue_as_of_date": "2026-09-30"},
         )
         self.assertIn(tables.p2_combined_table, revenue_sql)
-        self.assertIn(tables.p2_revenue_detail_table, revenue_sql)
-        self.assertIn("DATE '2026-09-30'", revenue_sql)
+        self.assertIn(tables.p3_revenue_table, revenue_sql)
+        self.assertNotIn(tables.p2_revenue_detail_table, revenue_sql)
+        self.assertIn("expected_fixed_revenue", revenue_sql)
         self.assertIn(
             "gannett-enterprise-data.consumers_rfz.rate_mapping_combined",
             revenue_sql,
@@ -385,48 +385,48 @@ class WorkflowOrchestrationTests(unittest.TestCase):
                 datetime.date(2026, 9, 20),
             )
 
-    def test_revenue_validation_rejects_duplicate_detail_keys(self):
+    def test_revenue_validation_rejects_duplicate_origin_keys(self):
         class QueryJob:
             def result(self):
                 return [
                     {
-                        "detail_count": 10,
-                        "summary_count": 2,
-                        "duplicate_detail_keys": 1,
-                        "wrong_as_of_date_count": 0,
-                        "earned_exceeds_paid_count": 0,
+                        "expected_count": 10,
+                        "output_count": 10,
+                        "duplicate_origin_keys": 1,
+                        "missing_origin_count": 0,
+                        "unexpected_origin_count": 0,
+                        "null_metric_count": 0,
                     }
                 ]
 
         client = Mock()
         client.query.return_value = QueryJob()
         with self.assertRaisesRegex(RuntimeError, "keys are not unique"):
-            require_revenue_tables(
+            require_revenue_table(
                 client,
                 self.tables,
-                datetime.date(2026, 9, 30),
             )
 
-    def test_revenue_validation_rejects_earned_revenue_above_paid_value(self):
+    def test_revenue_validation_rejects_incomplete_origin_coverage(self):
         class QueryJob:
             def result(self):
                 return [
                     {
-                        "detail_count": 10,
-                        "summary_count": 2,
-                        "duplicate_detail_keys": 0,
-                        "wrong_as_of_date_count": 0,
-                        "earned_exceeds_paid_count": 1,
+                        "expected_count": 10,
+                        "output_count": 9,
+                        "duplicate_origin_keys": 0,
+                        "missing_origin_count": 1,
+                        "unexpected_origin_count": 0,
+                        "null_metric_count": 0,
                     }
                 ]
 
         client = Mock()
         client.query.return_value = QueryJob()
-        with self.assertRaisesRegex(RuntimeError, "earned revenue exceeds"):
-            require_revenue_tables(
+        with self.assertRaisesRegex(RuntimeError, "does not match eligible P2 origins"):
+            require_revenue_table(
                 client,
                 self.tables,
-                datetime.date(2026, 9, 30),
             )
 
 

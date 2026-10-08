@@ -262,40 +262,57 @@ def require_usage_table(
     )
 
 
-def require_revenue_tables(
+def require_revenue_table(
     client: bigquery.Client,
     tables: WorkflowTables,
-    as_of_date: datetime.date,
 ) -> None:
     row = _query_one(
         client,
         f"""
+        WITH eligible_origins AS (
+          SELECT id_subscrip AS origin_id_subscrip
+          FROM `{tables.p2_combined_table}`
+          WHERE Repeat_Restarts IN (
+            'repeat restart via intro',
+            'repeat restart via winback'
+          )
+        ),
+        revenue AS (
+          SELECT *
+          FROM `{tables.p3_revenue_table}`
+        )
         SELECT
-          (SELECT COUNT(*) FROM `{tables.p2_revenue_detail_table}`) AS detail_count,
-          (SELECT COUNT(*) FROM `{tables.p2_revenue_summary_table}`) AS summary_count,
-          (SELECT COUNT(*) - COUNT(DISTINCT CONCAT(
-             origin_id_subscrip, '|', horizon
-           ))
-           FROM `{tables.p2_revenue_detail_table}`) AS duplicate_detail_keys,
-          (SELECT COUNTIF(as_of_date != DATE '{as_of_date.isoformat()}')
-           FROM `{tables.p2_revenue_detail_table}`) AS wrong_as_of_date_count,
-          (SELECT COUNTIF(current_earned_revenue > current_paid_invoice_value)
-           FROM `{tables.p2_revenue_detail_table}`) AS earned_exceeds_paid_count
+          (SELECT COUNT(*) FROM eligible_origins) AS expected_count,
+          (SELECT COUNT(*) FROM revenue) AS output_count,
+          (SELECT COUNT(*) - COUNT(DISTINCT origin_id_subscrip)
+           FROM revenue) AS duplicate_origin_keys,
+          (SELECT COUNT(*)
+           FROM eligible_origins e
+           LEFT JOIN revenue r USING (origin_id_subscrip)
+           WHERE r.origin_id_subscrip IS NULL) AS missing_origin_count,
+          (SELECT COUNT(*)
+           FROM revenue r
+           LEFT JOIN eligible_origins e USING (origin_id_subscrip)
+           WHERE e.origin_id_subscrip IS NULL) AS unexpected_origin_count,
+          (SELECT COUNTIF(
+             actual_paid_invoice_value IS NULL
+             OR expected_fixed_revenue IS NULL
+             OR service_period_type IS NULL
+             OR had_restart_stop_save IS NULL
+           )
+           FROM revenue) AS null_metric_count
         """,
     )
-    if row["detail_count"] <= 0 or row["summary_count"] <= 0:
-        raise RuntimeError("Revenue validation failed: a revenue output table is empty.")
-    if row["duplicate_detail_keys"] != 0:
-        raise RuntimeError("Revenue validation failed: detail keys are not unique.")
-    if row["wrong_as_of_date_count"] != 0:
-        raise RuntimeError("Revenue validation failed: detail rows use the wrong as-of date.")
-    if row["earned_exceeds_paid_count"] != 0:
-        raise RuntimeError(
-            "Revenue validation failed: earned revenue exceeds paid invoice value."
-        )
+    if row["expected_count"] <= 0 or row["output_count"] <= 0:
+        raise RuntimeError("Revenue validation failed: the eligible input or output is empty.")
+    if row["duplicate_origin_keys"] != 0:
+        raise RuntimeError("Revenue validation failed: origin subscription keys are not unique.")
+    if row["missing_origin_count"] != 0 or row["unexpected_origin_count"] != 0:
+        raise RuntimeError("Revenue validation failed: output does not match eligible P2 origins.")
+    if row["null_metric_count"] != 0:
+        raise RuntimeError("Revenue validation failed: required revenue metrics contain nulls.")
     print(
-        f"✅ Revenue outputs validated: {row['detail_count']:,} detail rows and "
-        f"{row['summary_count']:,} summary rows for as_of_date={as_of_date}."
+        f"✅ Revenue output validated: {row['output_count']:,} repeat-restart origins."
     )
 
 
@@ -447,16 +464,10 @@ def run_feature_stage(
 def run_revenue_stage(
     client: bigquery.Client,
     tables: WorkflowTables,
-    as_of_date: datetime.date,
 ) -> None:
     print("\n=== Stage 5/6: repeat-restart revenue analysis ===")
-    execute_sql_script(
-        client,
-        REVENUE_SQL,
-        tables,
-        {"revenue_as_of_date": as_of_date.isoformat()},
-    )
-    require_revenue_tables(client, tables, as_of_date)
+    execute_sql_script(client, REVENUE_SQL, tables)
+    require_revenue_table(client, tables)
 
 
 def run_workflow(
@@ -467,15 +478,11 @@ def run_workflow(
     stage: str = "all",
     ga_end_date: str | None = None,
     ga_start_date: str | None = None,
-    revenue_as_of_date: str | None = None,
     local_output: str | None = None,
 ) -> None:
     inference_date = resolve_sunday(run_date)
     ga_end = datetime.date.fromisoformat(ga_end_date) if ga_end_date else inference_date
     ga_start = datetime.date.fromisoformat(ga_start_date) if ga_start_date else None
-    revenue_as_of = (
-        datetime.date.fromisoformat(revenue_as_of_date) if revenue_as_of_date else ga_end
-    )
     if stage in {"all", "ga"} and ga_end < inference_date:
         raise ValueError("--ga-end-date must cover the resolved weekly inference Sunday.")
 
@@ -494,7 +501,7 @@ def run_workflow(
     if stage in {"all", "p2"}:
         run_p2_stage(client, tables, inference_date)
     if stage in {"all", "revenue"}:
-        run_revenue_stage(client, tables, revenue_as_of)
+        run_revenue_stage(client, tables)
     if stage in {"all", "features"}:
         run_feature_stage(client, tables, inference_date)
 
@@ -527,10 +534,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--ga-start-date",
         help="Required only when initializing an empty GA platform table.",
-    )
-    parser.add_argument(
-        "--revenue-as-of-date",
-        help="Inclusive revenue cutoff. Defaults to --ga-end-date.",
     )
     parser.add_argument(
         "--environment",
@@ -582,7 +585,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             stage=args.stage,
             ga_end_date=args.ga_end_date,
             ga_start_date=args.ga_start_date,
-            revenue_as_of_date=args.revenue_as_of_date,
             local_output=args.local_output,
         )
     except Exception as exc:

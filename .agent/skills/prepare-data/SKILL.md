@@ -1,6 +1,6 @@
 ---
 name: prepare-data
-description: Run and validate the Stop & Save weekly BigQuery preparation workflow, including the weekly pChurn source, daily GA platform catch-up, ordered P1/P2/P3 materializations, revenue horizons, and usage features. Use for full weekly refreshes or individual preparation stages.
+description: Run and validate the Stop & Save weekly BigQuery preparation workflow, including the weekly pChurn source, daily GA platform catch-up, ordered P1/P2/P3 materializations, repeat-restart revenue comparison, and usage features. Use for full weekly refreshes or individual preparation stages.
 ---
 
 # Prepare Stop & Save Data
@@ -15,7 +15,7 @@ The workflow runs these stages in order and stops after any failure or assessmen
 2. Catch up daily `ss_test_ga4_platform` partitions through that Sunday.
 3. Run `ss_test_result_P1_gcp_events.sql`.
 4. Run `ss_test_result_P2_gcp_sourced.sql`.
-5. Run `ss_test_result_P3_revenue.sql` for repeat-restarter 30-, 60-, 90-day, and to-date revenue scenarios.
+5. Run `ss_test_result_P3_revenue.sql` to compare repeat-restarter paid-invoice value with expected fixed revenue.
 6. Run `ss_test_result_P3_gcp_sourced_add_feas.sql`.
 
 Run it in staging:
@@ -24,9 +24,9 @@ Run it in staging:
 uv run python src/run_prepare_data.py --run-date YYYY-MM-DD
 ```
 
-`--run-date` may be any date in the target week and resolves to that week's Sunday. `--ga-end-date` defaults to the same Sunday. The inclusive revenue cutoff defaults to `--ga-end-date`; override it with `--revenue-as-of-date` only when the revenue observation date intentionally differs. If the GA table has no baseline, provide an inclusive `--ga-start-date`; never use a date before `2025-12-29`.
+`--run-date` may be any date in the target week and resolves to that week's Sunday. `--ga-end-date` defaults to the same Sunday. If the GA table has no baseline, provide an inclusive `--ga-start-date`; never use a date before `2025-12-29`.
 
-The runner checks the intervention input, source partitions, 90-day GA coverage, nonempty outputs, requested-week rows, filtered versus unfiltered counts, revenue key uniqueness, and the revenue cutoff. Staging runs also report row-count and schema differences from production. Do not continue manually after a failure.
+The runner checks the intervention input, source partitions, 90-day GA coverage, nonempty outputs, requested-week rows, filtered versus unfiltered counts, and complete one-row-per-origin revenue coverage. Staging runs also report row-count and schema differences from production. Do not continue manually after a failure.
 
 ## Environments and authorization
 
@@ -69,11 +69,12 @@ Run revenue independently only after P2 is current:
 ```bash
 uv run python src/run_prepare_data.py \
   --run-date YYYY-MM-DD \
-  --stage revenue \
-  --revenue-as-of-date YYYY-MM-DD
+  --stage revenue
 ```
 
-The detail table grain is original subscription × horizon for users labeled as repeat restarters via intro or winback. Observation windows start on the original subscription's effective permanent-stop date. The query compares paid revenue from restarted subscriptions with scenarios in which the user instead remained at the original monthly stop-save price. Fixed horizons include only fully observed origins.
+The revenue table has one row per original subscription labeled as a repeat restarter via intro or winback. `actual_paid_invoice_value` is the total value of valid paid restart invoices. `expected_fixed_revenue` is the original monthly stop-save price multiplied by the number of paid restart invoices. The output also labels the first paid invoice as monthly or longer-contract service and flags whether a restart stop-save rate was applied.
+
+`dev_prorated_revenue_restarts.sql` and `dev_prorated_revenue_origin_and_restarts.sql` are reference analyses only. They are not part of the six-stage workflow.
 
 ## Failure rules
 

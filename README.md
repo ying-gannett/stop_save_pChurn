@@ -43,7 +43,7 @@ stop_save_pChurn/
 ├── notebooks/                      # Jupyter notebooks for analysis and experimentation
 ├── src/
 │   ├── sql/                        # BQ scripts
-│   │   └── ss_test_result_P3_revenue.sql  # Repeat-restarter revenue horizons
+│   │   └── ss_test_result_P3_revenue.sql  # Repeat-restarter revenue comparison
 │   ├── data_processing.py          # SQL execution
 │   ├── data_assessment.py          # Data quality assessment and logging
 │   ├── run_prepare_data.py         # Ordered, staging-first weekly workflow
@@ -62,7 +62,7 @@ The preparation workflow runs six stages in order:
 2. Catch up daily GA platform partitions from `raw_ga_platform.sql`.
 3. Refresh P1 GCP event results.
 4. Refresh P2 unfiltered and filtered results.
-5. Refresh the P3 repeat-restarter revenue detail and summary tables.
+5. Refresh the P3 repeat-restarter revenue comparison table.
 6. Refresh the P3 usage-analysis feature table.
 
 The full runner defaults to the isolated
@@ -73,10 +73,9 @@ uv run python src/run_prepare_data.py --run-date 2026-09-30
 ```
 
 The run date may be any day in the target week and resolves to that week's Sunday.
-Use `--ga-end-date` when GA should be caught up beyond that Sunday. Revenue uses the GA
-end date as its inclusive cutoff unless `--revenue-as-of-date` is supplied. The runner
-validates the intervention input, source partitions, GA coverage, row counts,
-requested-week outputs, revenue keys, and revenue cutoff, and stops immediately after a
+Use `--ga-end-date` when GA should be caught up beyond that Sunday. The runner validates
+the intervention input, source partitions, GA coverage, row counts, requested-week
+outputs, and complete one-row-per-origin revenue coverage, and stops immediately after a
 failed stage. A staging run also reports row-count and schema differences from production
 so intentional query changes can be reviewed.
 
@@ -91,9 +90,11 @@ uv run python src/run_prepare_data.py \
 
 Run one stage through the same guarded entry point with `--stage source`, `--stage ga`,
 `--stage p1`, `--stage p2`, `--stage revenue`, or `--stage features`. Individual stages
-assume their upstream tables are ready. For a standalone revenue refresh, set
-`--revenue-as-of-date` explicitly when its cutoff should differ from the resolved Sunday.
-All preparation commands use `src/run_prepare_data.py`.
+assume their upstream tables are ready. All preparation commands use
+`src/run_prepare_data.py`.
+
+The two `dev_prorated_revenue_*` SQL files are retained as references and are not executed
+by the preparation workflow.
 
 The packaged agent instructions are in `prepare-data.skill`. After installing or updating
 the package, reload skills before invoking the workflow through an agent.

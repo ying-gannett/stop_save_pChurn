@@ -129,9 +129,10 @@ select
 from origins h
 left join metric i on 
   h.origin_id_subscrip = i.origin_id_subscrip
+;
 
 CREATE OR REPLACE TABLE
-  `{{p2_revenue_detail_table}}`
+  `{{p3_revenue_table}}`
 OPTIONS (
   description = 'Account-level expected fixed revenue and paid-invoice revenue for repeat restarters.'
 )
