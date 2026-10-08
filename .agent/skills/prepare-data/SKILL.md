@@ -12,11 +12,11 @@ Run preparation from the repository root through `src/run_prepare_data.py`. This
 The workflow runs these stages in order and stops after any failure or assessment alert:
 
 1. Write the weekly Sunday partition of `stop_save_test_Bart`.
-2. Catch up daily `ss_test_ga4_platform` partitions through that Sunday.
-3. Run `ss_test_result_P1_gcp_events.sql`.
-4. Run `ss_test_result_P2_gcp_sourced.sql`.
-5. Run `ss_test_result_P3_revenue.sql` to compare repeat-restarter paid-invoice value with expected fixed revenue.
-6. Run `ss_test_result_P3_gcp_sourced_add_feas.sql`.
+2. Catch up daily `ss_test_P1_raw_ga_platform` partitions through that Sunday using `ss_test_P1_raw_ga_platform.sql`.
+3. Run `ss_test_P1_gcp_events.sql`.
+4. Run `ss_test_P2_combined_results.sql`.
+5. Run `ss_test_P3_revenue_analysis.sql` to compare repeat-restarter paid-invoice value with expected fixed revenue.
+6. Run `ss_test_P3_usages_features.sql`.
 
 Run it in staging:
 

@@ -15,6 +15,7 @@ INTERVENTION_DATE_OVERRIDES = {
     "2026-04-09": "2026-04-05",
     "2026-08-31": "2026-08-23",
     "2026-09-07": "2026-08-30",
+    "2026-10-06": "2026-09-27",
 }
 
 _IDENTIFIER_COMPONENT = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -114,18 +115,18 @@ def resolve_workflow_tables(
             project, mutable_activation_dataset, "stop_save_test_Bart"
         ),
         ga_platform_table=qualified_table(
-            project, mutable_activation_dataset, "ss_test_ga4_platform"
+            project, mutable_activation_dataset, "ss_test_P1_raw_ga_platform"
         ),
         p1_event_table=qualified_table(
-            project, mutable_results_dataset, "ss_test_result_v3-0_gcp_event"
+            project, mutable_results_dataset, "ss_test_P1_gcp_events"
         ),
         p2_unfiltered_table=qualified_table(
             project,
             mutable_results_dataset,
-            "ss_test_result_p1_p2_combined_unfiltered",
+            "ss_test_P2_combined_results_unfiltered",
         ),
         p2_combined_table=qualified_table(
-            project, mutable_results_dataset, "ss_test_result_p1_p2_combined"
+            project, mutable_results_dataset, "ss_test_P2_combined_results"
         ),
         p2_revenue_detail_table=qualified_table(
             project, mutable_results_dataset, "ss_test_result_p2_revenue_detail"
@@ -134,10 +135,10 @@ def resolve_workflow_tables(
             project, mutable_results_dataset, "ss_test_result_p2_revenue_summary"
         ),
         p3_revenue_table=qualified_table(
-            project, mutable_results_dataset, "ss_test_result_p3_revenue"
+            project, mutable_results_dataset, "ss_test_P3_revenue_analysis"
         ),
         usage_analysis_table=qualified_table(
-            project, mutable_results_dataset, "ss_test_result_usage_analysis"
+            project, mutable_results_dataset, "ss_test_P3_usages_features"
         ),
         intervention_table=qualified_table(project, results_dataset, "stop_save_test_applied_Bart"),
         selected_markets_table=qualified_table(

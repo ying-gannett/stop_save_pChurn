@@ -43,7 +43,7 @@ stop_save_pChurn/
 ├── notebooks/                      # Jupyter notebooks for analysis and experimentation
 ├── src/
 │   ├── sql/                        # BQ scripts
-│   │   └── ss_test_result_P3_revenue.sql  # Repeat-restarter revenue comparison
+│   │   └── ss_test_P3_revenue_analysis.sql  # Repeat-restarter revenue comparison
 │   ├── data_processing.py          # SQL execution
 │   ├── data_assessment.py          # Data quality assessment and logging
 │   ├── run_prepare_data.py         # Ordered, staging-first weekly workflow
@@ -59,11 +59,11 @@ stop_save_pChurn/
 The preparation workflow runs six stages in order:
 
 1. Write the weekly Sunday partition from `stop_save_source.sql`.
-2. Catch up daily GA platform partitions from `raw_ga_platform.sql`.
-3. Refresh P1 GCP event results.
-4. Refresh P2 unfiltered and filtered results.
-5. Refresh the P3 repeat-restarter revenue comparison table.
-6. Refresh the P3 usage-analysis feature table.
+2. Catch up daily GA platform partitions from `ss_test_P1_raw_ga_platform.sql`.
+3. Refresh P1 GCP event results from `ss_test_P1_gcp_events.sql`.
+4. Refresh P2 unfiltered and filtered results from `ss_test_P2_combined_results.sql`.
+5. Refresh the P3 repeat-restarter revenue comparison from `ss_test_P3_revenue_analysis.sql`.
+6. Refresh the P3 usage features from `ss_test_P3_usages_features.sql`.
 
 The full runner defaults to the isolated
 `gannett-datascience.stop_save_refactor_staging` dataset:

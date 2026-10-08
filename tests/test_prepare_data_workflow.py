@@ -37,6 +37,30 @@ class WorkflowConfigurationTests(unittest.TestCase):
             tables.intervention_table,
             "gannett-datascience.test_results_zone.stop_save_test_applied_Bart",
         )
+        self.assertEqual(
+            tables.ga_platform_table,
+            "gannett-datascience.stop_save_refactor_staging.ss_test_P1_raw_ga_platform",
+        )
+        self.assertEqual(
+            tables.p1_event_table,
+            "gannett-datascience.stop_save_refactor_staging.ss_test_P1_gcp_events",
+        )
+        self.assertEqual(
+            tables.p2_unfiltered_table,
+            "gannett-datascience.stop_save_refactor_staging.ss_test_P2_combined_results_unfiltered",
+        )
+        self.assertEqual(
+            tables.p2_combined_table,
+            "gannett-datascience.stop_save_refactor_staging.ss_test_P2_combined_results",
+        )
+        self.assertEqual(
+            tables.p3_revenue_table,
+            "gannett-datascience.stop_save_refactor_staging.ss_test_P3_revenue_analysis",
+        )
+        self.assertEqual(
+            tables.usage_analysis_table,
+            "gannett-datascience.stop_save_refactor_staging.ss_test_P3_usages_features",
+        )
 
     def test_production_requires_explicit_confirmation(self):
         with self.assertRaisesRegex(ValueError, "--confirm-production"):
@@ -55,9 +79,9 @@ class WorkflowConfigurationTests(unittest.TestCase):
     def test_self_materializing_queries_render_for_staging(self):
         tables = resolve_workflow_tables("staging")
         sql_files = (
-            "src/sql/ss_test_result_P1_gcp_events.sql",
-            "src/sql/ss_test_result_P2_gcp_sourced.sql",
-            "src/sql/ss_test_result_P3_gcp_sourced_add_feas.sql",
+            "src/sql/ss_test_P1_gcp_events.sql",
+            "src/sql/ss_test_P2_combined_results.sql",
+            "src/sql/ss_test_P3_usages_features.sql",
         )
 
         for sql_file in sql_files:
@@ -71,7 +95,7 @@ class WorkflowConfigurationTests(unittest.TestCase):
         self.assertIn(tables.p1_event_table, p2_sql)
 
         revenue_sql = load_and_render_sql(
-            "src/sql/ss_test_result_P3_revenue.sql",
+            "src/sql/ss_test_P3_revenue_analysis.sql",
             tables,
         )
         self.assertIn(tables.p2_combined_table, revenue_sql)
@@ -311,12 +335,12 @@ class WorkflowOrchestrationTests(unittest.TestCase):
             [
                 call(
                     run_date="2026-09-05",
-                    sql_file="src/sql/raw_ga_platform.sql",
+                    sql_file="src/sql/ss_test_P1_raw_ga_platform.sql",
                     target_table=self.tables.ga_platform_table,
                 ),
                 call(
                     run_date="2026-09-06",
-                    sql_file="src/sql/raw_ga_platform.sql",
+                    sql_file="src/sql/ss_test_P1_raw_ga_platform.sql",
                     target_table=self.tables.ga_platform_table,
                 ),
             ],
