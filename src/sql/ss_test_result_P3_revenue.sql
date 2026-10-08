@@ -1,88 +1,59 @@
 -- Estimate the revenue opportunity from closing the repeat-restart loophole.
 --
--- Primary comparison: earned pre-tax revenue over identical observation windows.
--- Secondary comparison: unprorated pre-tax paid-invoice value over those windows.
+-- Actual paid invoice total value: restarters' total paid invoice value since restart until current date.
+-- Expected Fixed Revenue: stop save rate * actual paid invoice counts.
+-- service_period_type: Classification of the service period (e.g., Monthly Contract, Longer Contract, no payment)
+-- had_restart_stop_save: Flag indicating whether the restarter had a stop-save rate applied during their restart period.
 --
 -- This is a scenario analysis, not a causal estimate. The 100% fix scenario assumes
 -- every repeat restarter would have remained on the original monthly stop-save rate.
 
-DECLARE as_of_date DATE DEFAULT DATE '{{revenue_as_of_date}}';
-
 CREATE TEMP TABLE restart_revenue_work AS
-WITH horizon_definitions AS (
-  SELECT '30_days' AS horizon, 30 AS horizon_days
-  UNION ALL
-  SELECT '60_days', 60
-  UNION ALL
-  SELECT '90_days', 90
-  UNION ALL
-  SELECT 'to_date', CAST(NULL AS INT64)
-),
-origins AS (
+WITH origins AS ( -- 591 origin id_sub
   SELECT
     inference_date,
     id_subscrip AS origin_id_subscrip,
     website_id,
+    contact_channels,
     cohort,
     Treatment,
+    src_risk_tier,
+    CAST(stop_save_price AS NUMERIC) AS stop_save_price,
     Repeat_Restarts,
-    stop_save_price,
+    perm_stop_date,
     new_subid_counts,
     restart_history,
-    perm_stop_date AS analysis_start_date,
-    REPLACE(Repeat_Restarts, 'repeat restart via ', '') AS restart_type
   FROM `{{p2_combined_table}}`
   WHERE Repeat_Restarts IN (
     'repeat restart via intro',
     'repeat restart via winback'
   )
 ),
-restart_pairs AS (
+restart_pairs AS (  -- 591 origin id_sub, 592 restart id_sub
   SELECT
     o.origin_id_subscrip,
     history.id_subscrip AS restart_id_subscrip,
     MIN(history.event_date) AS restart_date
-  FROM origins o
-  CROSS JOIN UNNEST(o.restart_history) AS history
+  FROM origins o,
+  UNNEST(o.restart_history) AS history
   WHERE history.id_subscrip IS NOT NULL
-    AND history.event_date <= as_of_date
   GROUP BY
     o.origin_id_subscrip,
     history.id_subscrip
 ),
-origin_horizons AS (
+classified_invoices AS (
   SELECT
-    o.* EXCEPT (restart_history),
-    h.horizon,
-    h.horizon_days,
-    as_of_date,
-    CASE
-      WHEN h.horizon_days IS NULL THEN DATE_ADD(as_of_date, INTERVAL 1 DAY)
-      ELSE DATE_ADD(o.analysis_start_date, INTERVAL h.horizon_days DAY)
-    END AS window_end_exclusive,
-    CASE
-      WHEN h.horizon_days IS NULL
-        THEN DATE_DIFF(DATE_ADD(as_of_date, INTERVAL 1 DAY), o.analysis_start_date, DAY)
-      ELSE h.horizon_days
-    END AS exposure_days
-  FROM origins o
-  CROSS JOIN horizon_definitions h
-  WHERE o.analysis_start_date <= as_of_date
-    AND (
-      h.horizon_days IS NULL
-      OR DATE_DIFF(DATE_ADD(as_of_date, INTERVAL 1 DAY), o.analysis_start_date, DAY)
-        >= h.horizon_days
-    )
-),
-invoice_classified AS (
-  SELECT
-    p.id_invoice,
-    p.id_subscrip AS restart_id_subscrip,
+    r.origin_id_subscrip,
+    r.restart_id_subscrip,
     r.restart_date,
+    p.id_invoice,
     p.id_payment_date,
     p.amount_without_tax + p.balance AS paid_invoice_value,
-    p.service_start_date,
-    p.service_end_date,
+    SAFE.PARSE_DATE('%Y%m%d', CAST(p.service_start_date AS STRING)) AS service_start,
+    DATE_ADD(
+      SAFE.PARSE_DATE('%Y%m%d', CAST(p.service_end_date AS STRING)),
+      INTERVAL 1 DAY
+    ) AS service_end_exclusive,
     CASE
       WHEN p.id_payment_date IS NOT NULL AND p.id_decline_date IS NULL THEN 'Paid'
       WHEN p.id_payment_date IS NOT NULL
@@ -99,166 +70,71 @@ invoice_classified AS (
       WHEN p.id_payment_date IS NULL AND p.id_decline_date IS NULL THEN 'Not Paid'
       ELSE 'Other'
     END AS payment_status
-  FROM (
-    SELECT DISTINCT restart_id_subscrip, restart_date
-    FROM restart_pairs
-  ) r
+  FROM restart_pairs r
   JOIN `gannett-enterprise-data.consumers_curated_zone_assets.subscriptions_invoice_payment` p
     ON p.id_subscrip = r.restart_id_subscrip
   WHERE balance >= 0
 ),
-paid_invoices AS (
-  select 
+restart_paid_invoices AS (   -- 588 restarters paid 812 invoice
+  SELECT 
     *,
     CAST(DATE_DIFF(service_end_exclusive, service_start, DAY) AS NUMERIC) as service_period
-  from (
-    SELECT
-      *,
-      SAFE.PARSE_DATE('%Y%m%d', CAST(service_start_date AS STRING)) AS service_start,
-      DATE_ADD(
-        SAFE.PARSE_DATE('%Y%m%d', CAST(service_end_date AS STRING)),
-        INTERVAL 1 DAY
-      ) AS service_end_exclusive,
-    FROM invoice_classified
-    WHERE payment_status = 'Paid'
-  )
-  WHERE service_start >= restart_date
-    AND service_start < service_end_exclusive
+  FROM classified_invoices
+  WHERE payment_status = 'Paid'
+  AND service_start < service_end_exclusive
+  and service_start >= restart_date
 ),
-rate_plan_flags AS (
+labelled_rate_plan AS (
   SELECT
-    p.origin_id_subscrip,
-    COUNTIF(REGEXP_CONTAINS(UPPER(COALESCE(m.description, '')), r'YEAR|12M')) > 0
-      AS had_annual_plan_by_as_of_date,
+    p.* except(payment_status),
+    case
+      when service_period > 40 then 'Longer Contract'
+      else 'Monthly Contract'
+    end as service_period_type,
+    r.effective_date, r.end_date, 
+    m.description,
     COUNTIF(
-      REGEXP_CONTAINS(UPPER(COALESCE(m.description, '')), r'\bFOR\b')
-      OR r.monthly_rate <= 1.10
-    ) > 0 AS had_promotional_plan_by_as_of_date,
-    COUNTIF(REGEXP_CONTAINS(UPPER(COALESCE(m.description, '')), r'STOP[ -]?SAVE')) > 0
-      AS had_restart_stop_save_by_as_of_date
-  FROM restart_pairs p
+      REGEXP_CONTAINS(
+        UPPER(COALESCE(m.description, '')), 
+        r'STOP[ -]?SAVE'
+      )
+    ) over (partition by p.restart_id_subscrip) > 0 AS had_restart_stop_save
+  FROM restart_paid_invoices p
   JOIN `gannett-enterprise-data.consumers_curated_zone_assets.subscriptions_rate_new` r
     ON r.id_subscrip = p.restart_id_subscrip
-  LEFT JOIN `gannett-enterprise-data.consumers_rfz.rate_mapping_combined` m
+  JOIN `gannett-enterprise-data.consumers_rfz.rate_mapping_combined` m
     ON LOWER(TRIM(r.rate_key_system)) = LOWER(TRIM(m.rate_key_system))
     AND r.rate_key_value = m.rate_key_value
-  WHERE r.effective_date BETWEEN p.restart_date AND as_of_date
-  GROUP BY p.origin_id_subscrip
+  where p.service_end_exclusive between r.effective_date and r.end_date
+  order by restart_id_subscrip, service_start, effective_date
 ),
-invoice_metrics AS (
-  SELECT
-    h.*,
-    CAST(stop_save_price AS NUMERIC)
-      * CAST(exposure_days AS NUMERIC)
-      / CAST(30.4375 AS NUMERIC) AS full_fix_revenue,
-    COUNT(DISTINCT i.id_invoice) AS all_paid_invoice_count,
-    COUNT(DISTINCT IF(
-      i.id_payment_date < h.window_end_exclusive,
-      i.id_invoice,
-      NULL
-    )) AS current_window_paid_invoice_count,
-    COALESCE(SUM(
-      CASE
-        WHEN i.service_end_exclusive <= h.window_end_exclusive then i.paid_invoice_value
-        WHEN i.service_start <= h.window_end_exclusive
-        THEN i.paid_invoice_value * SAFE_DIVIDE(
-          CAST(DATE_DIFF(h.window_end_exclusive, i.service_start, DAY) AS NUMERIC),
-          i.service_period
-        )
-        ELSE 0
-      END
-    ), 0) AS current_earned_revenue,
-    COALESCE(SUM(
-      CASE
-        WHEN i.id_payment_date < h.window_end_exclusive
-        THEN i.paid_invoice_value
-        ELSE 0
-      END
-    ), 0) AS current_paid_invoice_value
-  FROM origin_horizons h
-  JOIN restart_pairs p
-    ON h.origin_id_subscrip = p.origin_id_subscrip
-  LEFT JOIN paid_invoices i
-    ON p.restart_id_subscrip = i.restart_id_subscrip
-  GROUP BY ALL
-),
-metrics_base AS (
-  SELECT
-    i.*,
-    full_fix_revenue * CAST(0.25 AS NUMERIC) AS fix_revenue_25pct,
-    full_fix_revenue * CAST(0.50 AS NUMERIC) AS fix_revenue_50pct,
-    full_fix_revenue * CAST(0.75 AS NUMERIC) AS fix_revenue_75pct,
-    COALESCE(r.had_annual_plan_by_as_of_date, FALSE) AS had_annual_plan_by_as_of_date,
-    COALESCE(r.had_promotional_plan_by_as_of_date, FALSE)
-      AS had_promotional_plan_by_as_of_date,
-    COALESCE(r.had_restart_stop_save_by_as_of_date, FALSE)
-      AS had_restart_stop_save_by_as_of_date,
-  FROM invoice_metrics i
-  LEFT JOIN rate_plan_flags r
-    USING (origin_id_subscrip)
-),
-metrics AS (
-  SELECT
-    *,
-    full_fix_revenue - current_earned_revenue AS incremental_revenue_100pct,
-    fix_revenue_25pct- current_earned_revenue AS incremental_revenue_25pct,
-    fix_revenue_50pct - current_earned_revenue AS incremental_revenue_50pct,
-    fix_revenue_75pct - current_earned_revenue AS incremental_revenue_75pct,
-    SAFE_DIVIDE(current_earned_revenue, full_fix_revenue)
-      AS break_even_acceptance_rate
-  FROM metrics_base
+metric as (
+  select distinct 
+    origin_id_subscrip,
+    COUNT(DISTINCT id_invoice) OVER (PARTITION BY origin_id_subscrip) AS actual_paid_invoice_cnt,
+    COALESCE(SUM(paid_invoice_value) OVER (PARTITION BY origin_id_subscrip), 0) AS actual_paid_invoice_value,
+    FIRST_VALUE(service_period_type) OVER (
+      PARTITION BY origin_id_subscrip ORDER BY service_start ASC
+      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+    ) AS first_service_period_type, 
+    any_value(had_restart_stop_save) OVER (PARTITION BY origin_id_subscrip) as had_restart_stop_save
+  from labelled_rate_plan
 )
-SELECT
-  *,
-  ARRAY_TO_STRING(ARRAY(
-    SELECT flag
-    FROM UNNEST([
-      IF(all_paid_invoice_count = 0, 'no_paid_invoices', NULL)
-    ]) AS flag
-    WHERE flag IS NOT NULL
-  ), ' | ') AS data_quality_flags
-FROM metrics;
+select
+  h.*,
+  COALESCE(i.actual_paid_invoice_value, 0) as actual_paid_invoice_value,
+  COALESCE(i.actual_paid_invoice_cnt * h.stop_save_price, 0) as expected_fixed_revenue,
+  COALESCE(i.first_service_period_type, 'no payment') as service_period_type,
+  COALESCE(i.had_restart_stop_save, false) as had_restart_stop_save
+from origins h
+left join metric i on 
+  h.origin_id_subscrip = i.origin_id_subscrip
 
 CREATE OR REPLACE TABLE
   `{{p2_revenue_detail_table}}`
 OPTIONS (
-  description = 'Account-level earned and paid-invoice revenue scenarios for repeat restarters.'
+  description = 'Account-level expected fixed revenue and paid-invoice revenue for repeat restarters.'
 )
 AS
 SELECT *
 FROM restart_revenue_work;
-
-CREATE OR REPLACE TABLE
-  `{{p2_revenue_summary_table}}`
-OPTIONS (
-  description = 'Aggregated repeat-restart loophole scenarios by restart type and experiment segment.'
-)
-AS
-SELECT
-  as_of_date,
-  horizon,
-  horizon_days,
-  restart_type,
-  cohort,
-  Treatment,
-  COUNT(distinct origin_id_subscrip) AS origin_subscriptions,
-  SUM(COALESCE(new_subid_counts, 0)) AS restart_subscriptions,
-  COUNTIF(data_quality_flags != '') AS origins_with_quality_flags,
-  ROUND(SUM(full_fix_revenue), 2) AS full_fix_revenue,
-  ROUND(SUM(current_earned_revenue), 2) AS current_earned_revenue,
-  ROUND(SUM(current_paid_invoice_value), 2) AS current_paid_invoice_value,
-  ROUND(SUM(fix_revenue_25pct), 2) AS fix_revenue_25pct,
-  ROUND(SUM(fix_revenue_50pct), 2) AS fix_revenue_50pct,
-  ROUND(SUM(fix_revenue_75pct), 2) AS fix_revenue_75pct,
-  ROUND(SUM(incremental_revenue_25pct), 2) AS incremental_revenue_25pct,
-  ROUND(SUM(incremental_revenue_50pct), 2) AS incremental_revenue_50pct,
-  ROUND(SUM(incremental_revenue_75pct), 2) AS incremental_revenue_75pct,
-  ROUND(SUM(incremental_revenue_100pct), 2) AS incremental_revenue_100pct,
-  SAFE_DIVIDE(SUM(current_earned_revenue), SUM(full_fix_revenue))
-    AS weighted_break_even_acceptance_rate
-FROM `{{p2_revenue_detail_table}}`
-GROUP BY ALL;
-
-SELECT *
-FROM `{{p2_revenue_summary_table}}`
-ORDER BY horizon_days, horizon, restart_type, cohort, Treatment;
