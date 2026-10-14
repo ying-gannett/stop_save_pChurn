@@ -124,7 +124,7 @@ select
   h.*,
   COALESCE(i.actual_paid_invoice_value, 0) as actual_paid_invoice_value,
   COALESCE(i.actual_paid_invoice_cnt * h.stop_save_price, 0) as expected_fixed_revenue,
-  COALESCE(i.first_service_period_type, 'no payment') as service_period_type,
+  COALESCE(i.first_service_period_type, 'No Payment') as service_period_type,
   COALESCE(i.had_restart_stop_save, false) as had_restart_stop_save
 from origins h
 left join metric i on 

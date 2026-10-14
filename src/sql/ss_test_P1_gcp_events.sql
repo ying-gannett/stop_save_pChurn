@@ -211,7 +211,7 @@
   select
     *,
     case
-      when has_rejoin='No Rejoin' and contact_channels='Contacted both ways' then 'seek offer both channels'
+      when has_rejoin='No Rejoin' and contains_substr(contact_channels, 'Contacted both ways') then 'seek offer both channels'
       when has_rejoin='No Rejoin' and multi_contact_points = '2+ Contacts' then 'seek offer 2+'
       else "not repeate stop-saves"
     end as Repeat_StopSaves,
