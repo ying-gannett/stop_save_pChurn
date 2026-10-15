@@ -39,6 +39,22 @@ _GROUP_COLORS = {
         "midpoint": "#4C78A8",
         "tiered": "#8E5EA2",
     },
+    "comparison_group": {
+        "no action": "#8C8C8C",
+        "contacted": "#4C78A8",
+        "contacted — gamers": "#CF1B66",
+        "contacted — not gamers": "#4C78A8",
+        "gamers — repeat stop-save": "#DD0AC4",
+        "gamers — repeat restarter": "#E9510B",
+        "not gamers": "#4C78A8",
+        "repeat stop-save — paid lower": "#DD0AC4",
+        "repeat stop-save — did not pay lower": "#F687E9",
+        "repeat restarter — longer contract": "#EF7E49",
+        "repeat restarter — had stop save on restart": "#772904",
+        "repeat restarter — monthly contract": "#E9510B",
+        "not gamers — saved": OUTCOME_COLORS[SAVED],
+        "not gamers — voluntary stopped": OUTCOME_COLORS[STOPPED],
+    },
 }
 
 
@@ -109,7 +125,7 @@ def fit_behavior_reference(
     data,
     metrics,
 ):
-    """Fit 1%-99% clipping bounds and robust scaling parameters per metric on called-once contacted population."""
+    """Fit 1%-99% clipping bounds and robust scaling parameters per metric on a reference population."""
     metric_values = data[metrics]
     lower_bounds = metric_values.quantile(0.01)
     upper_bounds = metric_values.quantile(0.99)
@@ -131,7 +147,7 @@ def fit_behavior_reference(
 
 
 def clip_metric_values(data, metrics, reference):
-    """Clip metrics to the primary contacted-population bounds."""
+    """Clip metrics to the supplied reference-population bounds."""
     return data[metrics].clip(
         lower=reference["lower_bounds"][metrics],
         upper=reference["upper_bounds"][metrics],
@@ -140,7 +156,7 @@ def clip_metric_values(data, metrics, reference):
 
 
 def transform_behavior_metrics(data, metrics, reference):
-    """Express clipped metrics in primary-population median/IQR units."""
+    """Express clipped metrics in reference-population median/IQR units."""
     clipped = clip_metric_values(data, metrics, reference)
     return clipped.sub(reference["centers"][metrics], axis=1).div(
         reference["spreads"][metrics],
@@ -720,6 +736,8 @@ def plot_metric_boxplot_views(
         }
         for text in legend.get_texts():
             text.set_text(label_map.get(text.get_text(), text.get_text()))
+        legend.set_loc("upper left")
+        legend.set_bbox_to_anchor((1.02, 1))
 
     prepared = _prepare_metric_boxplot_data(
         data=data,
