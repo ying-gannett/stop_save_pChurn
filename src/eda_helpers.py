@@ -20,6 +20,28 @@ OUTCOME_COLORS = {
     SAVED: "#2E8B57",
     STOPPED: "#C44E52",
 }
+
+# Population-comparison colors carry the analysis hierarchy. Not Gamers stay in
+# the established blue family. Gamers use warm colors: repeat stop-save leans
+# toward burnt orange, repeat restarter toward amber, and their subtypes vary
+# mainly in lightness within the corresponding branch.
+_COMPARISON_GROUP_COLORS = {
+    "no action": "#8C8C8C",
+    "contacted": "#4C78A8",
+    "contacted — gamers": "#E68613",
+    "contacted — not gamers": "#4C78A8",
+    "gamers — repeat stop-save": "#C95721",
+    "gamers — repeat restarter": "#D99A1D",
+    "not gamers": "#4C78A8",
+    "repeat stop-save — paid lower": "#963A13",
+    "repeat stop-save — did not pay lower": "#E89061",
+    "repeat restarter — longer contract": "#A76F05",
+    "repeat restarter — had stop save on restart": "#D99A1D",
+    "repeat restarter — monthly contract": "#F0C66A",
+    "not gamers — saved": OUTCOME_COLORS[SAVED],
+    "not gamers — voluntary stopped": OUTCOME_COLORS[STOPPED],
+}
+
 _GROUP_COLORS = {
     "analysis_population": {
         "no action yet": "#8C8C8C",
@@ -39,22 +61,7 @@ _GROUP_COLORS = {
         "midpoint": "#4C78A8",
         "tiered": "#8E5EA2",
     },
-    "comparison_group": {
-        "no action": "#8C8C8C",
-        "contacted": "#4C78A8",
-        "contacted — gamers": "#CF1B66",
-        "contacted — not gamers": "#4C78A8",
-        "gamers — repeat stop-save": "#DD0AC4",
-        "gamers — repeat restarter": "#E9510B",
-        "not gamers": "#4C78A8",
-        "repeat stop-save — paid lower": "#DD0AC4",
-        "repeat stop-save — did not pay lower": "#F687E9",
-        "repeat restarter — longer contract": "#EF7E49",
-        "repeat restarter — had stop save on restart": "#772904",
-        "repeat restarter — monthly contract": "#E9510B",
-        "not gamers — saved": OUTCOME_COLORS[SAVED],
-        "not gamers — voluntary stopped": OUTCOME_COLORS[STOPPED],
-    },
+    "comparison_group": _COMPARISON_GROUP_COLORS,
 }
 
 
