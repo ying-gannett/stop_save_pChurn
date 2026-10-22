@@ -1,0 +1,105 @@
+comparison,dimension,comparison_group,dimension_value,category_order,accounts,within_group_share_pct
+Not Gamers: Saved vs voluntary Stopped,rfv_bin,Saved,SuperUser,0,1410,47.52275025278059
+Not Gamers: Saved vs voluntary Stopped,rfv_bin,Saved,AtRisk,1,353,11.897539602291877
+Not Gamers: Saved vs voluntary Stopped,rfv_bin,Saved,Zombie,2,163,5.49376474553421
+Not Gamers: Saved vs voluntary Stopped,rfv_bin,Saved,Enthusiast,3,480,16.177957532861477
+Not Gamers: Saved vs voluntary Stopped,rfv_bin,Saved,Indifferent,4,254,8.560835861139198
+Not Gamers: Saved vs voluntary Stopped,rfv_bin,Saved,Moderate,5,302,10.178631614425345
+Not Gamers: Saved vs voluntary Stopped,rfv_bin,Saved,Other,6,5,0.16852039096730706
+Not Gamers: Saved vs voluntary Stopped,rfv_bin,Stopped,SuperUser,0,1617,24.264705882352942
+Not Gamers: Saved vs voluntary Stopped,rfv_bin,Stopped,AtRisk,1,1393,20.903361344537817
+Not Gamers: Saved vs voluntary Stopped,rfv_bin,Stopped,Zombie,2,1535,23.03421368547419
+Not Gamers: Saved vs voluntary Stopped,rfv_bin,Stopped,Enthusiast,3,693,10.399159663865547
+Not Gamers: Saved vs voluntary Stopped,rfv_bin,Stopped,Indifferent,4,765,11.479591836734695
+Not Gamers: Saved vs voluntary Stopped,rfv_bin,Stopped,Moderate,5,655,9.828931572629052
+Not Gamers: Saved vs voluntary Stopped,rfv_bin,Stopped,Other,6,6,0.09003601440576231
+Not Gamers: Saved vs voluntary Stopped,favor_platforms,Saved,native app,0,1351,45.53420963936637
+Not Gamers: Saved vs voluntary Stopped,favor_platforms,Saved,desktop,1,1040,35.052241321199865
+Not Gamers: Saved vs voluntary Stopped,favor_platforms,Saved,Missing,2,202,6.808223795079204
+Not Gamers: Saved vs voluntary Stopped,favor_platforms,Saved,mobileweb,3,344,11.594202898550725
+Not Gamers: Saved vs voluntary Stopped,favor_platforms,Saved,Other,4,30,1.0111223458038423
+Not Gamers: Saved vs voluntary Stopped,favor_platforms,Stopped,native app,0,2135,32.037815126050425
+Not Gamers: Saved vs voluntary Stopped,favor_platforms,Stopped,desktop,1,1680,25.210084033613445
+Not Gamers: Saved vs voluntary Stopped,favor_platforms,Stopped,Missing,2,1740,26.110444177671067
+Not Gamers: Saved vs voluntary Stopped,favor_platforms,Stopped,mobileweb,3,1027,15.411164465786314
+Not Gamers: Saved vs voluntary Stopped,favor_platforms,Stopped,Other,4,82,1.2304921968787514
+Not Gamers: Saved vs voluntary Stopped,is_T1T2,Saved,Others,0,1261,42.50084260195484
+Not Gamers: Saved vs voluntary Stopped,is_T1T2,Saved,T1T2,1,1706,57.49915739804516
+Not Gamers: Saved vs voluntary Stopped,is_T1T2,Stopped,Others,0,3649,54.75690276110444
+Not Gamers: Saved vs voluntary Stopped,is_T1T2,Stopped,T1T2,1,3015,45.24309723889556
+Not Gamers: Saved vs voluntary Stopped,is_selected_80Mkts,Saved,Selected_81Mkts,0,1748,58.91472868217055
+Not Gamers: Saved vs voluntary Stopped,is_selected_80Mkts,Saved,Others,1,1219,41.08527131782946
+Not Gamers: Saved vs voluntary Stopped,is_selected_80Mkts,Stopped,Selected_81Mkts,0,3711,55.68727490996399
+Not Gamers: Saved vs voluntary Stopped,is_selected_80Mkts,Stopped,Others,1,2953,44.31272509003602
+Not Gamers: Saved vs voluntary Stopped,market,Saved,Other,0,1999,67.37445230872936
+Not Gamers: Saved vs voluntary Stopped,market,Saved,USA TODAY,1,109,3.673744523087293
+Not Gamers: Saved vs voluntary Stopped,market,Saved,Detroit,2,214,7.212672733400742
+Not Gamers: Saved vs voluntary Stopped,market,Saved,Phoenix,3,108,3.640040444893832
+Not Gamers: Saved vs voluntary Stopped,market,Saved,Milwaukee,4,140,4.718570947084597
+Not Gamers: Saved vs voluntary Stopped,market,Saved,Indianapolis,5,84,2.8311425682507583
+Not Gamers: Saved vs voluntary Stopped,market,Saved,Cincinnati,6,104,3.505224132119986
+Not Gamers: Saved vs voluntary Stopped,market,Saved,Palm Beach,7,65,2.1907650825749916
+Not Gamers: Saved vs voluntary Stopped,market,Saved,Ventura,8,91,3.067071115604988
+Not Gamers: Saved vs voluntary Stopped,market,Saved,Palm Springs,9,53,1.7863161442534545
+Not Gamers: Saved vs voluntary Stopped,market,Stopped,Other,0,4579,68.7124849939976
+Not Gamers: Saved vs voluntary Stopped,market,Stopped,USA TODAY,1,616,9.243697478991598
+Not Gamers: Saved vs voluntary Stopped,market,Stopped,Detroit,2,332,4.981992797118847
+Not Gamers: Saved vs voluntary Stopped,market,Stopped,Phoenix,3,235,3.5264105642256904
+Not Gamers: Saved vs voluntary Stopped,market,Stopped,Milwaukee,4,176,2.6410564225690276
+Not Gamers: Saved vs voluntary Stopped,market,Stopped,Indianapolis,5,164,2.460984393757503
+Not Gamers: Saved vs voluntary Stopped,market,Stopped,Cincinnati,6,139,2.0858343337334935
+Not Gamers: Saved vs voluntary Stopped,market,Stopped,Palm Beach,7,167,2.506002400960384
+Not Gamers: Saved vs voluntary Stopped,market,Stopped,Ventura,8,114,1.7106842737094836
+Not Gamers: Saved vs voluntary Stopped,market,Stopped,Palm Springs,9,142,2.1308523409363747
+Contacted users: Gamers vs Not Gamers,rfv_bin,Gamers,SuperUser,0,1329,52.1585557299843
+Contacted users: Gamers vs Not Gamers,rfv_bin,Gamers,AtRisk,1,292,11.459968602825747
+Contacted users: Gamers vs Not Gamers,rfv_bin,Gamers,Zombie,2,103,4.042386185243328
+Contacted users: Gamers vs Not Gamers,rfv_bin,Gamers,Enthusiast,3,358,14.050235478806908
+Contacted users: Gamers vs Not Gamers,rfv_bin,Gamers,Moderate,4,265,10.400313971742543
+Contacted users: Gamers vs Not Gamers,rfv_bin,Gamers,Indifferent,5,192,7.535321821036106
+Contacted users: Gamers vs Not Gamers,rfv_bin,Gamers,Other,6,9,0.35321821036106754
+Contacted users: Gamers vs Not Gamers,rfv_bin,Not Gamers,SuperUser,0,3027,31.42975807288963
+Contacted users: Gamers vs Not Gamers,rfv_bin,Not Gamers,AtRisk,1,1746,18.12895857128024
+Contacted users: Gamers vs Not Gamers,rfv_bin,Not Gamers,Zombie,2,1698,17.630567957636796
+Contacted users: Gamers vs Not Gamers,rfv_bin,Not Gamers,Enthusiast,3,1173,12.179420620911639
+Contacted users: Gamers vs Not Gamers,rfv_bin,Not Gamers,Moderate,4,957,9.936662859516145
+Contacted users: Gamers vs Not Gamers,rfv_bin,Not Gamers,Indifferent,5,1019,10.580417402138927
+Contacted users: Gamers vs Not Gamers,rfv_bin,Not Gamers,Other,6,11,0.11421451562662237
+Contacted users: Gamers vs Not Gamers,favor_platforms,Gamers,native app,0,1222,47.95918367346938
+Contacted users: Gamers vs Not Gamers,favor_platforms,Gamers,desktop,1,888,34.850863422291994
+Contacted users: Gamers vs Not Gamers,favor_platforms,Gamers,Missing,2,145,5.6907378335949765
+Contacted users: Gamers vs Not Gamers,favor_platforms,Gamers,mobileweb,3,269,10.557299843014128
+Contacted users: Gamers vs Not Gamers,favor_platforms,Gamers,Other,4,24,0.9419152276295133
+Contacted users: Gamers vs Not Gamers,favor_platforms,Not Gamers,native app,0,3486,36.19561831585505
+Contacted users: Gamers vs Not Gamers,favor_platforms,Not Gamers,desktop,1,2720,28.24213477312844
+Contacted users: Gamers vs Not Gamers,favor_platforms,Not Gamers,Missing,2,1942,20.164053576990966
+Contacted users: Gamers vs Not Gamers,favor_platforms,Not Gamers,mobileweb,3,1371,14.235281902190842
+Contacted users: Gamers vs Not Gamers,favor_platforms,Not Gamers,Other,4,112,1.1629114318347005
+Contacted users: Gamers vs Not Gamers,is_T1T2,Gamers,T1T2,0,1517,59.53689167974883
+Contacted users: Gamers vs Not Gamers,is_T1T2,Gamers,Others,1,1031,40.46310832025118
+Contacted users: Gamers vs Not Gamers,is_T1T2,Not Gamers,T1T2,0,4721,49.01879347938947
+Contacted users: Gamers vs Not Gamers,is_T1T2,Not Gamers,Others,1,4910,50.981206520610534
+Contacted users: Gamers vs Not Gamers,is_selected_80Mkts,Gamers,Selected_81Mkts,0,1664,65.3061224489796
+Contacted users: Gamers vs Not Gamers,is_selected_80Mkts,Gamers,Others,1,884,34.69387755102041
+Contacted users: Gamers vs Not Gamers,is_selected_80Mkts,Not Gamers,Selected_81Mkts,0,5459,56.68154916415741
+Contacted users: Gamers vs Not Gamers,is_selected_80Mkts,Not Gamers,Others,1,4172,43.31845083584259
+Contacted users: Gamers vs Not Gamers,market,Gamers,Other,0,1751,68.72056514913658
+Contacted users: Gamers vs Not Gamers,market,Gamers,USA TODAY,1,71,2.7864992150706436
+Contacted users: Gamers vs Not Gamers,market,Gamers,Detroit,2,193,7.574568288854003
+Contacted users: Gamers vs Not Gamers,market,Gamers,Milwaukee,3,127,4.984301412872841
+Contacted users: Gamers vs Not Gamers,market,Gamers,Phoenix,4,92,3.610675039246468
+Contacted users: Gamers vs Not Gamers,market,Gamers,Cincinnati,5,82,3.2182103610675044
+Contacted users: Gamers vs Not Gamers,market,Gamers,Indianapolis,6,69,2.708006279434851
+Contacted users: Gamers vs Not Gamers,market,Gamers,Palm Beach,7,61,2.39403453689168
+Contacted users: Gamers vs Not Gamers,market,Gamers,Ventura,8,46,1.805337519623234
+Contacted users: Gamers vs Not Gamers,market,Gamers,Columbus,9,56,2.197802197802198
+Contacted users: Gamers vs Not Gamers,market,Not Gamers,Other,0,6579,68.31066348250441
+Contacted users: Gamers vs Not Gamers,market,Not Gamers,USA TODAY,1,725,7.527774893572838
+Contacted users: Gamers vs Not Gamers,market,Not Gamers,Detroit,2,546,5.669193230194165
+Contacted users: Gamers vs Not Gamers,market,Not Gamers,Milwaukee,3,316,3.2810715398193335
+Contacted users: Gamers vs Not Gamers,market,Not Gamers,Phoenix,4,343,3.56141625999377
+Contacted users: Gamers vs Not Gamers,market,Not Gamers,Cincinnati,5,243,2.5231024815699303
+Contacted users: Gamers vs Not Gamers,market,Not Gamers,Indianapolis,6,248,2.5750181704911226
+Contacted users: Gamers vs Not Gamers,market,Not Gamers,Palm Beach,7,232,2.408887965943308
+Contacted users: Gamers vs Not Gamers,market,Not Gamers,Ventura,8,205,2.1285432457688716
+Contacted users: Gamers vs Not Gamers,market,Not Gamers,Columbus,9,194,2.0143287301422492

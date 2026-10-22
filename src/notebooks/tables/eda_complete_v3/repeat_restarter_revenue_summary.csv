@@ -1,0 +1,9 @@
+dimension,dimension_value,restarters,actual_paid_invoice_value,expected_fixed_revenue,median_actual_paid_invoice_value,median_expected_fixed_revenue,scenario_difference,actual_to_expected_ratio
+overall,All repeat restarters,557,47742.150000000,11121.750000000,99.0,14.99,-36620.400000000,4.292683255782588
+restart_type,repeat restart via intro,451,40449.250000000,8374.480000000,99.0,14.99,-32074.770000000,4.830061090360237
+restart_type,repeat restart via winback,106,7292.900000000,2747.270000000,99.0,17.485,-4545.630000000,2.654598929118725
+restart_contract_type,Longer Contract,396,44737.000000000,5886.020000000,119.0,14.99,-38850.980000000,7.600551815997906
+restart_contract_type,Monthly Contract,157,3005.150000000,5235.730000000,15.99,29.98,2230.580000000,0.5739696279219899
+restart_contract_type,No Payment,4,0E-9,0E-9,0.0,0.0,0E-9,
+restart_stop_save,False,525,47337.870000000,10050.270000000,99.0,14.99,-37287.600000000,4.710109280646192
+restart_stop_save,True,32,404.280000000,1071.480000000,10.98,27.96,667.200000000,0.37730988912532193
