@@ -177,6 +177,34 @@ class EdaHelpersTests(unittest.TestCase):
         )
         self.assertTrue(all(ax.collections for ax in point_axes))
 
+    def test_group_clipped_boxplot_grid_supports_arbitrary_comparison_groups(self):
+        comparison_data = self.data.copy()
+        comparison_data["comparison_group"] = np.where(
+            comparison_data["outcome"].eq(eda_helpers.SAVED),
+            "Contacted — Gamers",
+            "Contacted — Not Gamers",
+        )
+        axes = eda_helpers.plot_group_clipped_boxplot_grid(
+            comparison_data,
+            metrics=self.metrics,
+            group_col="comparison_group",
+            group_order=["Contacted — Gamers", "Contacted — Not Gamers"],
+            show_points=False,
+            save=False,
+            show=False,
+            close=False,
+        )
+
+        self.assertEqual(len(axes), len(self.metrics))
+        self.assertEqual(axes[0].get_title(), self.metrics[0])
+        self.assertEqual(axes[0].get_ylabel(), "Clipped value")
+        self.assertFalse(axes[0].get_xticklabels())
+        legend_labels = [
+            text.get_text() for text in axes[0].figure.legends[0].get_texts()
+        ]
+        self.assertEqual(len(legend_labels), 2)
+        self.assertTrue(all("n=40" in label for label in legend_labels))
+
     def test_outcome_contrasts_reuse_the_matched_profile_results(self):
         self.assertEqual(len(self.profiles), 8)
         self.assertEqual(len(self.contrasts), 4)

@@ -4,6 +4,7 @@ import textwrap
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -812,6 +813,98 @@ def plot_metric_boxplot_views(
         close=close,
     )
     return axes
+
+
+def plot_group_clipped_boxplot_grid(
+    data,
+    metrics,
+    group_col,
+    group_order,
+    reference=None,
+    panel_size=(3.5, 4.0),
+    title="Clipped values in original business units",
+    show=False,
+    save=True,
+    chart_folder="charts",
+    file_name="group_clipped_business_units.png",
+    close=None,
+    show_points=False,
+):
+    """Plot one business-unit panel per metric for arbitrary comparison groups."""
+    plot_source = data.loc[data[group_col].isin(group_order)].copy()
+    if reference is None:
+        reference = fit_behavior_reference(plot_source, metrics)
+    clipped_values = clip_metric_values(plot_source, metrics, reference)
+    group_counts = (
+        plot_source.groupby(group_col, observed=True)[ID_COL]
+        .nunique()
+        .reindex(group_order, fill_value=0)
+    )
+    semantic_colors = _GROUP_COLORS[group_col.lower()]
+    palette = {
+        group: semantic_colors[group.lower()]
+        for group in group_order
+    }
+
+    fig, axes = plt.subplots(
+        1,
+        len(metrics),
+        figsize=(panel_size[0] * len(metrics), panel_size[1]),
+        squeeze=False,
+    )
+    axes = axes.ravel()
+    for ax, metric in zip(axes, metrics):
+        plot_data = pd.DataFrame(
+            {
+                group_col: plot_source[group_col].to_numpy(),
+                "value": clipped_values[metric].to_numpy(),
+            }
+        ).dropna(subset=["value"])
+        _plot_boxplot_with_points(
+            ax=ax,
+            plot_data=plot_data,
+            x=group_col,
+            y="value",
+            order=group_order,
+            hue=group_col,
+            hue_order=group_order,
+            palette=palette,
+            saturation=1,
+            legend=False,
+            show_points=show_points,
+            dodge=False,
+        )
+        ax.set_title(metric)
+        ax.set_xlabel("")
+        ax.set_ylabel("Clipped value")
+        ax.set_xticks([])
+
+    legend_handles = [
+        Patch(
+            facecolor=palette[group],
+            edgecolor="#4A4A4A",
+            label=f"{group} (n={int(group_counts.loc[group]):,})",
+        )
+        for group in group_order
+    ]
+    fig.legend(
+        handles=legend_handles,
+        title=group_col.replace("_", " ").title(),
+        loc="lower center",
+        bbox_to_anchor=(0.5, 0),
+        ncol=min(2, len(group_order)),
+    )
+    fig.suptitle(title, fontsize=15)
+    _finalize_chart(
+        fig,
+        show=show,
+        save=save,
+        chart_folder=chart_folder,
+        file_name=file_name,
+        close=close,
+        tight_layout_kwargs={"rect": (0, 0.18, 1, 0.93)},
+    )
+    return list(axes)
 
 
 def plot_profile_or_contrast_heatmap(
