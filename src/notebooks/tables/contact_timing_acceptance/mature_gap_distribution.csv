@@ -1,0 +1,4 @@
+Treatment,users,minimum,p25,median,p75,p90,p95,maximum
+Control,2053,0,6,29.0,59,88,104.39999999999986,181
+Midpoint,2113,0,5,25.0,51,84,98.0,181
+Tiered,934,0,5,26.5,49,74,92.0,141

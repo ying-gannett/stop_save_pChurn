@@ -113,6 +113,10 @@ metric as (
     origin_id_subscrip,
     COUNT(DISTINCT id_invoice) OVER (PARTITION BY origin_id_subscrip) AS actual_paid_invoice_cnt,
     COALESCE(SUM(paid_invoice_value) OVER (PARTITION BY origin_id_subscrip), 0) AS actual_paid_invoice_value,
+    FIRST_VALUE(service_period) OVER (
+      PARTITION BY origin_id_subscrip ORDER BY service_start ASC
+      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+    ) AS first_service_period,     
     FIRST_VALUE(service_period_type) OVER (
       PARTITION BY origin_id_subscrip ORDER BY service_start ASC
       ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
@@ -123,7 +127,18 @@ metric as (
 select
   h.*,
   COALESCE(i.actual_paid_invoice_value, 0) as actual_paid_invoice_value,
-  COALESCE(i.actual_paid_invoice_cnt * h.stop_save_price, 0) as expected_fixed_revenue,
+  case 
+    when i.first_service_period = 365 then 12 * h.stop_save_price
+    when i.first_service_period = 183 then 6 * h.stop_save_price
+    else COALESCE(i.actual_paid_invoice_cnt * h.stop_save_price, 0) 
+  end as expected_fixed_revenue,
+  case 
+    when i.first_service_period = 365 then 12
+    when i.first_service_period = 183 then 6
+    when i.first_service_period in (28, 30, 31) then 1
+    when i.first_service_period = 0 or i.first_service_period is null then 0
+    else 9999
+  end as service_period_months,
   COALESCE(i.first_service_period_type, 'No Payment') as service_period_type,
   COALESCE(i.had_restart_stop_save, false) as had_restart_stop_save
 from origins h
