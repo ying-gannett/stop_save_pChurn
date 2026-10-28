@@ -21,6 +21,11 @@ OUTCOME_COLORS = {
     SAVED: "#2E8B57",
     STOPPED: "#C44E52",
 }
+TREATMENT_COLORS = {
+    "Control": "#2E8B57",
+    "Midpoint": "#4C78A8",
+    "Tiered": "#8E5EA2",
+}
 
 # Population-comparison colors carry the analysis hierarchy. Not Gamers stay in
 # the established blue family. Gamers use warm colors: repeat stop-save leans
@@ -58,9 +63,8 @@ _GROUP_COLORS = {
         "contacted both ways": "#F28E2B"
     },
     "treatment": {
-        "control": "#2E8B57",
-        "midpoint": "#4C78A8",
-        "tiered": "#8E5EA2",
+        treatment.lower(): color
+        for treatment, color in TREATMENT_COLORS.items()
     },
     "comparison_group": _COMPARISON_GROUP_COLORS,
 }
