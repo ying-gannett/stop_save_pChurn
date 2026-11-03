@@ -1,2 +1,2 @@
-likelihood_ratio,degrees_of_freedom,p_value,additive_log_likelihood,interaction_log_likelihood
-15.028823391756305,8,0.058587424250162064,-2829.728889054615,-2822.214477358737
+likelihood_ratio,degrees_of_freedom,p_value,additive_log_likelihood,interaction_log_likelihood,result,interpretation
+26.700044447797154,8,0.0007964096235815434,-3238.9217175908743,-3225.5716953669757,Treatment-specific timing curves improve model fit,The association between contact delay and acceptance differs by Treatment; the differences are not adequately represented by baseline Treatment shifts alone.
