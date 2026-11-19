@@ -23,13 +23,14 @@ Options:
 
 For a real refresh, close both workbook copies in Excel. A timestamped workbook backup
 and CSV snapshot are saved under src/workbooks/backups first. The 11 pivot tables refresh
-when the updated workbook is next opened.
+when the updated workbook is next opened. The SharePoint copy excludes the Findings tab.
 """
 import argparse
 import datetime as dt
 import re
 import shutil
 import sys
+import tempfile
 from copy import copy
 from pathlib import Path
 
@@ -42,6 +43,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_WORKBOOK = SCRIPT_DIR / "workbooks" / "price point analysis_v2.xlsx"
 DEFAULT_SQL = SCRIPT_DIR / "sql" / "price_point_raw_data.sql"
 DEFAULT_SHAREPOINT_DIR = Path.home() / "ds_pchurn"
+SHAREPOINT_EXCLUDED_SHEETS = ("Findings",)
 DATA_COLS = [
     "grouped_start_price_group", "pricegroup", "Cohort", "Treatment", "start_price",
     "step_up_price", "stop_save_price", "src_risk_tier", "Status", "gamer_flag",
@@ -140,7 +142,15 @@ def write_workbook(path: Path, df: pd.DataFrame) -> None:
 def copy_to_sharepoint(workbook_path: Path, sharepoint_dir: Path) -> Path:
     destination = sharepoint_dir / workbook_path.name
     try:
-        shutil.copy2(workbook_path, destination)
+        with tempfile.TemporaryDirectory(prefix="price-point-sharepoint-") as tmp_dir:
+            staged_path = Path(tmp_dir) / workbook_path.name
+            wb = openpyxl.load_workbook(workbook_path)
+            for sheet_name in SHAREPOINT_EXCLUDED_SHEETS:
+                if sheet_name in wb.sheetnames:
+                    del wb[sheet_name]
+            wb.save(staged_path)
+            wb.close()
+            shutil.copy2(staged_path, destination)
     except OSError as exc:
         sys.exit(
             f"Reference workbook was updated, but the SharePoint copy failed: {exc}"
@@ -193,7 +203,7 @@ def main():
     destination = copy_to_sharepoint(wb_path, sharepoint_dir)
     print(f"Updated '{SHEET}' with {len(new):,} rows.")
     print(f"Backup and CSV snapshot saved in {backups}")
-    print(f"Updated workbook copied to {destination}")
+    print(f"Updated workbook copied to {destination} without the Findings tab")
 
 
 if __name__ == "__main__":
