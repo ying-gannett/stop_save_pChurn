@@ -211,3 +211,4 @@ data/
 .gemini/
 src/notebooks/charts/Archive/
 src/notebooks/tables/Archive/
+src/workbooks/backups/

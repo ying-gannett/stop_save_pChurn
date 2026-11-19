@@ -1,26 +1,29 @@
 #!/usr/bin/env python3
 """
-Refresh the "price point raw data" tab of the price point analysis workbook straight
-from BigQuery, replacing the manual Looker Studio export.
+Refresh the repository's price point analysis workbook from BigQuery, replacing the
+manual Looker Studio export.
 
 One-time setup (Terminal on your Mac):
-    pip3 install --upgrade google-cloud-bigquery db-dtypes pandas openpyxl
+    uv sync
     gcloud auth application-default login      # lets Python use your gcloud identity
 
 Usage:
-    # 1) Compare BigQuery with what's in the workbook now, change nothing:
-    python3 refresh_price_point_raw_data.py "price point analysis_v2.xlsx" --dry-run
+    # 1) Compare BigQuery with the reference workbook, change nothing:
+    uv run python src/refresh_price_point_raw_data.py --dry-run
 
-    # 2) Refresh the workbook (a timestamped backup is saved first):
-    python3 refresh_price_point_raw_data.py "price point analysis_v2.xlsx"
+    # 2) Refresh the reference workbook, then copy it to SharePoint:
+    uv run python src/refresh_price_point_raw_data.py
 
 Options:
-    --sql PATH        query file (default: sql/price_point_raw_data.sql under this script's directory)
-    --project ID      GCP project billed for the query (default: gannett-datascience)
-    --from-csv PATH   use a CSV instead of BigQuery (offline testing)
+    --workbook PATH        reference workbook (default: src/workbooks/price point analysis_v2.xlsx)
+    --sharepoint-dir PATH  destination folder (default: ~/ds_pchurn)
+    --sql PATH             query file (default: src/sql/price_point_raw_data.sql)
+    --project ID           GCP project billed for the query (default: gannett-datascience)
+    --from-csv PATH        use a CSV instead of BigQuery (offline testing)
 
-Close the workbook in Excel before running. The 11 pivot tables refresh when the file is
-next opened (refresh-on-open is enabled on their shared cache).
+For a real refresh, close both workbook copies in Excel. A timestamped workbook backup
+and CSV snapshot are saved under src/workbooks/backups first. The 11 pivot tables refresh
+when the updated workbook is next opened.
 """
 import argparse
 import datetime as dt
@@ -35,6 +38,10 @@ import pandas as pd
 
 SHEET = "price point raw data"
 TABLE = "price_point_raw_data"
+SCRIPT_DIR = Path(__file__).resolve().parent
+DEFAULT_WORKBOOK = SCRIPT_DIR / "workbooks" / "price point analysis_v2.xlsx"
+DEFAULT_SQL = SCRIPT_DIR / "sql" / "price_point_raw_data.sql"
+DEFAULT_SHAREPOINT_DIR = Path.home() / "ds_pchurn"
 DATA_COLS = [
     "grouped_start_price_group", "pricegroup", "Cohort", "Treatment", "start_price",
     "step_up_price", "stop_save_price", "src_risk_tier", "Status", "gamer_flag",
@@ -79,8 +86,8 @@ def compare(old: pd.DataFrame, new: pd.DataFrame) -> None:
         return len(d), int(d["Record Count"].sum()), round(float(d["Total Paid"].sum()), 2)
     o, n = totals(old), totals(new)
     print(f"{'':14}{'rows':>8}{'records':>10}{'total paid':>14}")
-    print(f"{'workbook now':14}{o[0]:>8,}{o[1]:>10,}{o[2]:>14,.2f}")
-    print(f"{'BigQuery':14}{n[0]:>8,}{n[1]:>10,}{n[2]:>14,.2f}")
+    print(f"{'reference':14}{o[0]:>8,}{o[1]:>10,}{o[2]:>14,.2f}")
+    print(f"{'new data':14}{n[0]:>8,}{n[1]:>10,}{n[2]:>14,.2f}")
     m = old.merge(new, on=KEY_COLS, how="outer", suffixes=("_old", "_new"), indicator=True)
     changed = m[(m["_merge"] == "both") & (
         (m["Record Count_old"] != m["Record Count_new"]) |
@@ -101,11 +108,6 @@ def write_workbook(path: Path, df: pd.DataFrame) -> None:
     template = {c: ws.cell(row=2, column=c) for c in range(1, ncols + 1)}
     styles = {c: (copy(cell.font), copy(cell.fill), copy(cell.border), copy(cell.alignment),
                   cell.number_format, copy(cell.protection)) for c, cell in template.items()}
-
-    # Contact Status and Gamer Status now come from SQL, not Excel calculated-column formulas.
-    for column in table.tableColumns:
-        if column.name in ("Contact Status", "Gamer Status"):
-            column.calculatedColumnFormula = None
 
     old_last = ws.max_row
     for r in range(2, old_last + 1):
@@ -135,13 +137,25 @@ def write_workbook(path: Path, df: pd.DataFrame) -> None:
     wb.save(path)
 
 
+def copy_to_sharepoint(workbook_path: Path, sharepoint_dir: Path) -> Path:
+    destination = sharepoint_dir / workbook_path.name
+    try:
+        shutil.copy2(workbook_path, destination)
+    except OSError as exc:
+        sys.exit(
+            f"Reference workbook was updated, but the SharePoint copy failed: {exc}"
+        )
+    return destination
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("workbook", type=Path)
+    ap.add_argument("--workbook", type=Path, default=DEFAULT_WORKBOOK)
+    ap.add_argument("--sharepoint-dir", type=Path, default=DEFAULT_SHAREPOINT_DIR)
     ap.add_argument(
         "--sql",
         type=Path,
-        default=Path(__file__).parent / "sql" / "price_point_raw_data.sql",
+        default=DEFAULT_SQL,
     )
     ap.add_argument("--project", default="gannett-datascience")
     ap.add_argument("--from-csv", type=Path)
@@ -149,11 +163,18 @@ def main():
     a = ap.parse_args()
 
     wb_path = a.workbook.expanduser().resolve()
+    sharepoint_dir = a.sharepoint_dir.expanduser()
     if not wb_path.exists():
         sys.exit(f"Workbook not found: {wb_path}")
     lock = wb_path.with_name("~$" + wb_path.name)
     if lock.exists() and not a.dry_run:
-        sys.exit("The workbook looks open in Excel (lock file found). Close it and re-run.")
+        sys.exit("The reference workbook looks open in Excel. Close it and re-run.")
+    if not a.dry_run:
+        if not sharepoint_dir.is_dir():
+            sys.exit(f"SharePoint folder not found: {sharepoint_dir}")
+        sharepoint_lock = sharepoint_dir / ("~$" + wb_path.name)
+        if sharepoint_lock.exists():
+            sys.exit("The SharePoint workbook looks open in Excel. Close it and re-run.")
 
     new = normalise(pd.read_csv(a.from_csv) if a.from_csv else fetch_bigquery(a.sql, a.project))
     current = read_current(openpyxl.load_workbook(wb_path, read_only=True, data_only=True)[SHEET])
@@ -169,10 +190,11 @@ def main():
     new.to_csv(backups / f"price_point_raw_data_{stamp}.csv", index=False)
 
     write_workbook(wb_path, new)
-    print(f"Updated '{SHEET}' with {len(new):,} rows. Backup and CSV snapshot saved in {backups}")
+    destination = copy_to_sharepoint(wb_path, sharepoint_dir)
+    print(f"Updated '{SHEET}' with {len(new):,} rows.")
+    print(f"Backup and CSV snapshot saved in {backups}")
+    print(f"Updated workbook copied to {destination}")
 
 
 if __name__ == "__main__":
     main()
-
-    Path.home() / "ds_pchurn"
