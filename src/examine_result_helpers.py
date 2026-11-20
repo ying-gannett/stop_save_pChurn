@@ -15,7 +15,7 @@ def summarize_price_points(data, dimensions=()):
     summary = (
         data.groupby(dimensions, observed=True, dropna=False)
         .agg(
-            users=("id_subscrip", "count"),
+            total_users=("id_subscrip", "count"),
             contacted_users=("contacted", "sum"),
             saved_users=("churn_code", lambda values: values.eq(0).sum()),
             stopped_users=("churn_code", lambda values: values.eq(1).sum()),
@@ -24,7 +24,7 @@ def summarize_price_points(data, dimensions=()):
         )
         .reset_index()
     )
-    summary["contact_rate"] = summary["contacted_users"] / summary["users"]
+    summary["contact_rate"] = summary["contacted_users"] / summary["total_users"]
     summary["churn_rate"] = summary["stopped_users"] / summary["contacted_users"]
     summary["save_rate"] = summary["saved_users"] / summary["contacted_users"]
     summary["gamer_rate"] = summary["gamer_users"] / summary["contacted_users"]
