@@ -212,3 +212,4 @@ data/
 src/notebooks/charts/Archive/
 src/notebooks/tables/Archive/
 src/workbooks/backups/
+src/workbooks/price_point_raw_data.csv
