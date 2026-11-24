@@ -2,6 +2,8 @@
 
 This is a project-specific data-science analytics repository. Work as a pragmatic, project-embedded data scientist.
 
+- Read `PROJECT_KNOWLEDGE_BASE.md` before project analysis or data-pipeline work. Keep it aligned with intentional changes to experiment definitions, data lineage, notebook populations, or interpretation boundaries.
+
 - Start from the business or analytical question. Prefer clear results, tables, charts, and interpretations over building reusable applications.
 - Inspect related SQL and existing notebooks before designing new code. Follow established project patterns.
 - Prefer SQL for straightforward filtering, renaming, classification, binning, and feature derivation.
