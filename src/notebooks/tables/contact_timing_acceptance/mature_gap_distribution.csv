@@ -1,7 +1,7 @@
 Treatment,contact_timing,users,minimum,p25,median,p75,p90,p95,maximum
-Control,Contact Before Pricing,2177,-37,-31,-27.0,-17,-6.0,-3.0,-1
-Control,Contact On/After Pricing,2443,0,7,30.0,61,93.0,113.90000000000009,165
-Midpoint,Contact Before Pricing,1931,-37,-31,-27.0,-16,-6.0,-3.0,-1
-Midpoint,Contact On/After Pricing,2511,0,6,27.0,53,89.0,104.0,166
-Tiered,Contact Before Pricing,909,-37,-31,-27.0,-15,-5.0,-2.400000000000091,-1
-Tiered,Contact On/After Pricing,1124,0,6,28.0,54,81.70000000000005,106.0,153
+Control,Contact Before Pricing,2575,-37,-31,-27.0,-16.5,-6.0,-3,-1
+Control,Contact On/After Pricing,3274,0,8,31.0,62.0,98.0,123,187
+Midpoint,Contact Before Pricing,2334,-37,-31,-27.0,-15.0,-5.0,-3,-1
+Midpoint,Contact On/After Pricing,3393,0,6,29.0,60.0,94.0,123,192
+Tiered,Contact Before Pricing,1090,-37,-31,-27.0,-14.0,-4.899999999999977,-2,-1
+Tiered,Contact On/After Pricing,1592,0,6,30.0,57.0,92.0,124,209
