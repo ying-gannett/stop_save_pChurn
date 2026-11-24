@@ -1,6 +1,6 @@
-# pChurn assistend Stop & Save 
+# pChurn assisted Stop & Save
 
-**pChurn assistend Stop & Save** is a predicted churn risk assisted retention business use case framework. It is designed to applying different stop-save strategies based on predicted churn risk of customers and evaluate the effectiveness of retention strategies. The project provides a AI assisted comprehensive pipeline for data preprocessing, data quanty assessment, and strategy evaluation.
+**pChurn assisted Stop & Save** is a predicted churn risk assisted retention business use case framework. It is designed to applying different stop-save strategies based on predicted churn risk of customers and evaluate the effectiveness of retention strategies. The project provides a AI assisted comprehensive pipeline for data preprocessing, data quality assessment, and strategy evaluation.
 
 ## 🚀 Features
 
@@ -8,9 +8,9 @@
     - **Churn Predictions**: predicted churn risk from a existing churn prediction model.
     - **Intervention Data(out of this workflow)**: which stop save strategy was applied to customer.
     - **Call Center Data(out of this workflow)**: whether and when customer called to call center. Whether the customer was saved or not.
-    - **Online Cancell Data**: whether and when customer cancelled the service via online.
+    - **Online Cancellation Data**: whether and when customer cancelled the service via online.
     - **Monitor performance Data**: Combine the above pieces and calculate performance metrics, such as churn, CNRC
-- **Data Quanty Assessment**: Evaluates the availability and the quality of each data source.
+- **Data Quality Assessment**: Evaluates the availability and the quality of each data source.
 - **Strategy Evaluation**: Robust data cleaning and feature engineering pipeline to evaluate the effectiveness of each stop save strategy.
     - **Evaluate metrics**: 
         - **Churn rate**: assess the churn rate of each strategy.

@@ -5,7 +5,7 @@
   -- Two-Offer Cohort: modeltype=MIDPOINT
     -- Treatment: MIDPOINT:CONTROL=1:1
   -- Three-Offer Cohort: modeltype=PCHURN
-    -- Treatment: MIDPOINT:CONTRO:TIERED=1:1:1
+    -- Treatment: MIDPOINT:CONTROL:TIERED=1:1:1
     -- TIERED: RISK1-5 maintain pchurn ratio.
 
 create or replace table `{{p2_unfiltered_table}}`
@@ -175,6 +175,6 @@ as
 select * from `{{p2_unfiltered_table}}`
 where paid_target = 0   -- exclude 60 users who contacted but pay target price 
   and conflict_tag = 'No'  -- exclude 1964(Y/N = 1964/101834 | 2%) vol perm without contact associated(EDE-14782 closed and can't explain) or invol perm with contact associated. 
-  and conflict_tag is not null  -- excldue 28 priced users not covered in consumer_events table
+  and conflict_tag is not null  -- exclude 28 priced users not covered in consumer_events table
   -- and is_two_payment_cycle_ago = 1 -- only matured users
 ;
