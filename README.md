@@ -93,8 +93,8 @@ Run one stage through the same guarded entry point with `--stage source`, `--sta
 assume their upstream tables are ready. All preparation commands use
 `src/run_prepare_data.py`.
 
-The two `dev_prorated_revenue_*` SQL files are retained as references and are not executed
-by the preparation workflow.
+The current repeat-restarter revenue analysis is implemented only in
+`src/sql/ss_test_P3_revenue_analysis.sql`; the former development queries have been removed.
 
 The packaged agent instructions are in `prepare-data.skill`. After installing or updating
 the package, reload skills before invoking the workflow through an agent.

@@ -40,8 +40,8 @@ WITH src AS (  -- = Looker Studio data source (custom SQL)
     END AS Status,
     CASE
       WHEN Repeat_Restarts = 'not repeat restarts'
-       AND Repeat_StopSaves = 'not repeate stop-saves' THEN 'Not Gamer'
-      WHEN Repeat_StopSaves = 'not repeate stop-saves' THEN 'Repeat Restart'
+       AND Repeat_StopSaves = 'not repeat stop-saves' THEN 'Not Gamer'
+      WHEN Repeat_StopSaves = 'not repeat stop-saves' THEN 'Repeat Restart'
       WHEN CONTAINS_SUBSTR(Repeat_StopSaves, "not") THEN 'Seek lower rate, still paid offered rate'  -- CONTAINS_TEXT is case-sensitive
       ELSE 'Seek and paid lower rate'
     END AS gamer_flag,

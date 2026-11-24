@@ -74,7 +74,7 @@ uv run python src/run_prepare_data.py \
 
 The revenue table has one row per original subscription labeled as a repeat restarter via intro or winback. `actual_paid_invoice_value` is the total value of valid paid restart invoices. `expected_fixed_revenue` is the original monthly stop-save price multiplied by the number of paid restart invoices. The output also labels the first paid invoice as monthly or longer-contract service and flags whether a restart stop-save rate was applied.
 
-`dev_prorated_revenue_restarts.sql` and `dev_prorated_revenue_origin_and_restarts.sql` are reference analyses only. They are not part of the six-stage workflow.
+`src/sql/ss_test_P3_revenue_analysis.sql` is the current repeat-restarter revenue analysis. The former development revenue queries have been removed.
 
 ## Failure rules
 

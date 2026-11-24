@@ -154,7 +154,7 @@
       case 
         when c.contact_channels="Contacted both ways" then least(c.min_contact_call_date, c.min_contact_ol_date)
         else coalesce(c.min_contact_call_date, c.min_contact_ol_date)
-      end as earlist_contact_date,
+      end as earliest_contact_date,
       case
         when c.call_counts>1 then "2+ Called"
         when c.call_counts=1 then "1 Called"
@@ -193,8 +193,8 @@
         when ol_contact_counts_tag is not null or call_counts_tag is not null then '1 Contacts'
         else '0 Contact'
       end as multi_contact_points,
-      earlist_contact_date,
-      if(earlist_contact_date<pricing_effective_date, 'Contact Before Pricing', 'Contact On/After Pricing') as contact_timing,
+      earliest_contact_date,
+      if(earliest_contact_date<pricing_effective_date, 'Contact Before Pricing', 'Contact On/After Pricing') as contact_timing,
       case 
         when olContact_90d_of_notice=1 or called_90d_of_notice=1 then 1
         else 0
@@ -213,7 +213,7 @@
     case
       when has_rejoin='No Rejoin' and contains_substr(contact_channels, 'Contacted both ways') then 'seek offer both channels'
       when has_rejoin='No Rejoin' and multi_contact_points = '2+ Contacts' then 'seek offer 2+'
-      else "not repeate stop-saves"
+      else "not repeat stop-saves"
     end as Repeat_StopSaves,
     case
       when has_rejoin='Rejoin' and see_off_90d_of_notice = 1 and perm_90d_of_notice = 'Yes' then ever_winback_rejoin

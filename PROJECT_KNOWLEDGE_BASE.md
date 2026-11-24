@@ -57,7 +57,7 @@ The implemented analyses are primarily descriptive. Treatment assignment may sup
 | Term | Current code definition |
 | --- | --- |
 | Contacted | `contact_channels != 'No Action yet'`. Contact may be a call, an online-cancel event, or both. |
-| First contact | The earliest call or online-cancel timestamp after the pricing notice. The source column is misspelled `earlist_contact_date`; downstream code uses that spelling. |
+| First contact | The earliest call or online-cancel timestamp after the pricing notice, stored as `earliest_contact_date`. |
 | Saved | A contacted subscription with `churn_code = 0`, meaning no permanent stop was found. This is a retention-based proxy, not a recorded offer-acceptance event. |
 | Voluntary Stopped | `churn_code = 1`, derived from a voluntary permanent-stop event. |
 | Involuntary/other Stopped | `churn_code = 2`; should be excluded from all analysis. |
@@ -135,7 +135,7 @@ Important workflow guardrails:
 - the weekly source row count and average null percentage are compared with history, with a greater-than-10% deviation treated as a failure;
 - staging row counts and schemas are compared with production after a full run.
 
-GA catch-up appends dates after the current maximum through the requested end date. It does not repair an older internal gap automatically. The two `dev_prorated_revenue_*.sql` files are reference analyses and are not part of the six-stage workflow.
+GA catch-up appends dates after the current maximum through the requested end date. It does not repair an older internal gap automatically. The former `dev_prorated_revenue_*.sql` development queries have been removed; `src/sql/ss_test_P3_revenue_analysis.sql` is the current repeat-restarter revenue analysis.
 
 ## 3. `examine_result.ipynb`
 

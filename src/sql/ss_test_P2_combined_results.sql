@@ -132,12 +132,12 @@ paid as (
       if(p.billing_amount < p1.stop_save_price, 1, 0) as lower_than_ss_tag,
       if(p.billing_amount = p1.step_up_price, 1, 0) as same_as_target_tag,  -- if they contacted, why pay target
       p.id_payment_date, 
-      -- p1.email_date, p1.pricing_effective_date, p1.earlist_contact_date, p1.contact_channels, p1.contact_timing, p1.perm_stop_sys_date, p1.perm_stop_date, p1.churn_code, p1.conflict_tag
+      -- p1.email_date, p1.pricing_effective_date, p1.earliest_contact_date, p1.contact_channels, p1.contact_timing, p1.perm_stop_sys_date, p1.perm_stop_date, p1.churn_code, p1.conflict_tag
     from p1
     join pays p on
       p1.billing_account = p.billing_account
       and p1.id_subscrip = p.id_subscrip
-      and p.id_payment_date > p1.earlist_contact_date   -- payments after contact
+      and p.id_payment_date > p1.earliest_contact_date   -- payments after contact
       and p.id_payment_date >= p1.pricing_effective_date   -- payments on or after effective date
     where p1.perm_stop_sys_date is null   -- retained users' payments 
     or p.id_payment_date < p1.perm_stop_sys_date    --  churned users' payments before stop was created
@@ -147,9 +147,9 @@ paid as (
 select 
   * except(paid_lower_than_ss, Repeat_StopSaves),
   case 
-    when paid_lower_than_ss=0 and Repeat_StopSaves='not repeate stop-saves' then 'not repeate stop-saves'
-    when paid_lower_than_ss=0 and Repeat_StopSaves!='not repeate stop-saves' then concat(Repeat_StopSaves, ', not pay lower than ss')
-    when paid_lower_than_ss=1 and Repeat_StopSaves='not repeate stop-saves' then 
+    when paid_lower_than_ss=0 and Repeat_StopSaves='not repeat stop-saves' then 'not repeat stop-saves'
+    when paid_lower_than_ss=0 and Repeat_StopSaves!='not repeat stop-saves' then concat(Repeat_StopSaves, ', not pay lower than ss')
+    when paid_lower_than_ss=1 and Repeat_StopSaves='not repeat stop-saves' then
       if(contains_substr(contact_groups, '|'), 'seek offer both channels, pay lower than ss', 'seek offer 2+, pay lower than ss')
     else concat(Repeat_StopSaves, ', pay lower than ss')
   end as Repeat_StopSaves, 

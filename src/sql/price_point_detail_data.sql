@@ -32,8 +32,8 @@ SELECT
   churn_code,
   CASE
     WHEN Repeat_Restarts = 'not repeat restarts'
-     AND Repeat_StopSaves = 'not repeate stop-saves' THEN 'Not Gamer'
-    WHEN Repeat_StopSaves = 'not repeate stop-saves' THEN 'Repeat Restart'
+     AND Repeat_StopSaves = 'not repeat stop-saves' THEN 'Not Gamer'
+    WHEN Repeat_StopSaves = 'not repeat stop-saves' THEN 'Repeat Restart'
     WHEN CONTAINS_SUBSTR(Repeat_StopSaves, 'not')
       THEN 'Seek lower rate, still paid offered rate'
     ELSE 'Seek and paid lower rate'
