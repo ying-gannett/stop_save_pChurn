@@ -81,6 +81,14 @@ p1 as (
     y.risk_tier as src_risk_tier,
     zf.frequency, zf.breadth, zf.tenure, cast(zf.tt_cost AS NUMERIC) as tt_cost,
     concat(b.Treatment, ' - ', y.risk_tier) as treatment_plus_tier,
+    case
+      when b.start_price <= 4.99 then '1. <=4.99'
+      when b.start_price <= 9.99 then '2. <=9.99'
+      when b.start_price <= 14.99 then '3. <=14.99'
+      when b.start_price <= 16.99 then '4. <=16.99'
+      when b.start_price <= 19.99 then '5. <=19.99'
+      else '6. >19.99 or null'
+    end as start_price_group,
     cast(REGEXP_EXTRACT(b.pricegroup, r'(\d+)') as int64) as pricegroup_order
   from b
   left join `{{stop_save_source_table}}` y on

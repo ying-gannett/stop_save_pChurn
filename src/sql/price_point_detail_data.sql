@@ -9,14 +9,7 @@ SELECT
   cohort,
   Treatment AS treatment,
   pricegroup,
-  CASE
-    WHEN pricegroup_order <= 4  THEN '1. <=4.99'
-    WHEN pricegroup_order <= 9  THEN '2. <=9.99'
-    WHEN pricegroup_order <= 14 THEN '3. <=14.99'
-    WHEN pricegroup_order <= 16 THEN '4. <=16.99'
-    WHEN pricegroup_order <= 19 THEN '5. <=19.99'
-    ELSE '6. <=24.99'
-  END AS start_price_group,
+  start_price_group,
   start_price,
   step_up_price,
   stop_save_price,

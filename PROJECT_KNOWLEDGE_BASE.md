@@ -69,6 +69,7 @@ The implemented analyses are primarily descriptive. Treatment assignment may sup
 | `revenue_raw` | Sum of qualifying paid invoice amounts after first contact and on/after the price-effective date, ending before a permanent stop where applicable. |
 | `revenue_single_saved` | The same qualifying revenue, but each invoice below the assigned stop-save price is raised to the stop-save price. It is a standardized “lower-rate gaming prevented” measure, not strictly actual collected revenue. |
 | CNRC | In implemented notebooks, `SUM(revenue_single_saved) / contacted subscriptions`. In the contact-timing notebook all rows are contacted, so the denominator is distinct subscriptions in the timing cell. |
+| Starting-price group | Derived once in P2 from numeric `start_price`: `<=4.99`, `<=9.99`, `<=14.99`, `<=16.99`, `<=19.99`, and `>19.99 or null`. All downstream analyses consume this `start_price_group` field. |
 
 ### How to examine the experiment result
 
@@ -112,7 +113,7 @@ daily GA platform sessions ─────────────────�
 | 1. Weekly source | `src/sql/stop_save_source.sql` | `test_activation_zone.stop_save_test_Bart` | Sunday-partitioned pChurn population: inference date, billing account, subscription, risk tier, and publication/market for the participating-market allowlist. |
 | 2. GA platform | `src/sql/ss_test_P1_raw_ga_platform.sql` | `test_activation_zone.ss_test_P1_raw_ga_platform` | Daily engaged-session counts by event date, anonymous ID, site code, and platform. Used for the trailing 90-day platform/session features. |
 | 3. P1 events | `src/sql/ss_test_P1_gcp_events.sql` | `test_results_zone.ss_test_P1_gcp_events` | One experiment event record per targeted subscription/account after consolidating pricing targets, calls, online-cancel contacts, permanent stops, and starts. Derives contact channel/count/timing, Saved/Stopped status, conflicts, repeat stop-saves, and repeat restarts. |
-| 4. P2 combined result | `src/sql/ss_test_P2_combined_results.sql` | `ss_test_P2_combined_results_unfiltered` and filtered `ss_test_P2_combined_results` | Joins the external assignments to P1, weekly pChurn and source features, plus paid invoices. Adds cohort/treatment, prices, risk tier, frequency/breadth/tenure/cost, actual and standardized revenue, payment behavior, Gamer labels, and the mature cutoff flag. |
+| 4. P2 combined result | `src/sql/ss_test_P2_combined_results.sql` | `ss_test_P2_combined_results_unfiltered` and filtered `ss_test_P2_combined_results` | Joins the external assignments to P1, weekly pChurn and source features, plus paid invoices. Adds cohort/treatment, prices and the canonical starting-price group, risk tier, frequency/breadth/tenure/cost, actual and standardized revenue, payment behavior, Gamer labels, and the mature cutoff flag. |
 | 5. Repeat-restart revenue | `src/sql/ss_test_P3_revenue_analysis.sql` | `test_results_zone.ss_test_P3_revenue_analysis` | One row per original Repeat restarter. Compares actual paid restart-invoice value with a fixed-original-stop-save-price scenario and labels first service period plus whether a restart stop-save rate was applied. This is a scenario analysis, not a causal estimate. |
 | 6. Usage features | `src/sql/ss_test_P3_usages_features.sql` | `test_results_zone.ss_test_P3_usages_features` | P2 result enriched with market metadata, RFV model score/bin, favorite platform(s), and average engaged sessions per day in the trailing 90 days. This is the main input to all three requested notebooks. |
 
@@ -135,7 +136,7 @@ Important workflow guardrails:
 - the weekly source row count and average null percentage are compared with history, with a greater-than-10% deviation treated as a failure;
 - staging row counts and schemas are compared with production after a full run.
 
-GA catch-up appends dates after the current maximum through the requested end date. It does not repair an older internal gap automatically. The former `dev_prorated_revenue_*.sql` development queries have been removed; `src/sql/ss_test_P3_revenue_analysis.sql` is the current repeat-restarter revenue analysis.
+GA catch-up appends dates after the current maximum through the requested end date. It does not repair an older internal gap automatically. Repeat-restarter revenue is prepared by `src/sql/ss_test_P3_revenue_analysis.sql`.
 
 ## 3. `examine_result.ipynb`
 
@@ -143,7 +144,7 @@ GA catch-up appends dates after the current maximum through the requested end da
 
 The notebook executes `src/sql/price_point_detail_data.sql`, which reads `test_results_zone.ss_test_P3_usages_features` and returns one row per mature subscription. It includes both No Action and Contacted subscriptions and retains null, Saved, and voluntary-Stop outcomes, while excluding `churn_code = 2`.
 
-The detail query supplies assignment dates, cohort/treatment, start/step-up/stop-save prices, pChurn risk tier, market attributes, contact status/timing, Gamer type, standardized revenue, and payment count. Its labeled starting-price groups—`<=4.99`, `<=9.99`, `<=14.99`, `<=16.99`, `<=19.99`, and `<=24.99`—are derived from `pricegroup_order`, not directly from the numeric `start_price` field. The contact-timing notebook instead applies the same thresholds directly to `start_price`; verify equivalence before joining those grouped outputs.
+The detail query supplies assignment dates, cohort/treatment, start/step-up/stop-save prices, the P2-defined `start_price_group`, pChurn risk tier, market attributes, contact status/timing, Gamer type, standardized revenue, and payment count.
 
 ### What it does
 
