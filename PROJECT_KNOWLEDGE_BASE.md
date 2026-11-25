@@ -1,6 +1,6 @@
 # pChurn-Assisted Stop & Save Project Knowledge Base
 
-Last reviewed against the repository implementation: 2026-11-24.
+Last reviewed against the repository implementation: 2026-11-25.
 
 This document is the project-level reference for future analysis. It describes what the current SQL and notebooks actually implement. When comments, saved notebook outputs, and executable code disagree, treat the current SQL and executable notebook cells as the source of truth, then document any intentional change here.
 
@@ -65,7 +65,7 @@ The implemented analyses are primarily descriptive. Treatment assignment may sup
 | Repeat stop-save | No rejoin plus contact through both channels or at least two contact points; P2 further labels whether the user paid below the stop-save price. |
 | Repeat restarter | A voluntary stopper who saw an offer within 90 days of notice, stopped within 90 days of notice, and started a new subscription within 90 days of that stop. The restart is labeled intro or winback. |
 | Gamer | Analytical umbrella for Repeat stop-save or Repeat restarter behavior. `Not Gamer`/`Regular User` means neither behavior. |
-| Mature | `is_two_payment_cycle_ago = 1`. This is a **global email-date cutoff**: an assignment is mature when its email date is no later than the latest email date among subscriptions observed with at least two distinct paid payment dates. It does not mean each included subscription paid twice. |
+| Mature | `is_two_payment_cycle_ago = 1`. This is a **batch-age flag implemented as a global email-date cutoff**. The latest email batch containing at least one subscription with two distinct qualifying paid payment dates establishes the cutoff; that batch and every earlier batch are labeled mature. Because the price-effective date is approximately one month after the email and the payment cycle is monthly, two qualifying post-effective payment dates indicate that the batch is at least approximately two months old. Requiring only one such subscription is intentional: it establishes that enough time has passed for the batch, while users who stopped or did not retain are not expected to make two payments. The flag does not mean each included subscription paid twice. |
 | `revenue_raw` | Sum of qualifying paid invoice amounts after first contact and on/after the price-effective date, ending before a permanent stop where applicable. |
 | `revenue_single_saved` | The same qualifying revenue, but each invoice below the assigned stop-save price is raised to the stop-save price. It is a standardized “lower-rate gaming prevented” measure, not strictly actual collected revenue. |
 | CNRC | In implemented notebooks, `SUM(revenue_single_saved) / contacted subscriptions`. In the contact-timing notebook all rows are contacted, so the denominator is distinct subscriptions in the timing cell. |
@@ -240,7 +240,7 @@ Sections 4-6 contain commented-out code for point-biserial correlations, bootstr
 - Default to staging. Production writes require explicit approval and the production confirmation flags.
 - Treat `revenue_single_saved` as a standardized scenario metric and `revenue_raw`/P3 paid-invoice value as closer to observed paid value; name the chosen measure in every result.
 - Always state whether the denominator is all assigned subscriptions, Contacted subscriptions, or Contacted Regular Users.
-- Always state whether the population is mature and remember that maturity is a cohort cutoff, not an individual two-payment condition.
+- Always state whether the population is mature and remember that maturity is a batch-age cutoff, not an individual retention or two-payment requirement. Maturity establishes a minimum batch age but does not give every mature batch the same observation window; use a fixed outcome horizon when equal follow-up is required for a predictive target.
 - Keep treatment comparisons separate by cohort unless there is a justified pooling strategy; Tiered does not exist in the Two-Offer Cohort.
 - Do not interpret Gamer, channel, or contact-timing comparisons causally.
 - Regenerate tables and charts after the relevant production refresh; existing notebook outputs are evidence of the last execution, not a live result.
